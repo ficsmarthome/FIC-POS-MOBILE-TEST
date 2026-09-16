@@ -3584,12 +3584,32 @@ class _OrderState extends State<OrderPage> {
     final bank = widget.bootstrap['bank'] is Map
         ? Map<String, dynamic>.from(widget.bootstrap['bank'] as Map)
         : <String, dynamic>{};
+    final branch = widget.bootstrap['branch'] is Map
+        ? Map<String, dynamic>.from(widget.bootstrap['branch'] as Map)
+        : <String, dynamic>{};
     final print = <String, dynamic>{
+      // Offline uses the same receipt renderer/layout as Web POS. Only the data
+      // source changes to cached bootstrap + local order; VietQR stays local.
+      'store_name': '${widget.bootstrap['store_name'] ?? 'FIC POS'}',
+      'branch_name': '${branch['ten'] ?? ''}',
+      'address': '${branch['diachi'] ?? ''}',
+      'phone': '${branch['dienthoai'] ?? branch['sodienthoai'] ?? ''}',
       'payment_qr': '',
       'show_payment_qr': bank['bin'] != null && '${bank['bin']}'.trim().isNotEmpty
           && bank['account_no'] != null && '${bank['account_no']}'.trim().isNotEmpty,
       'bank': bank,
       'template': <String, dynamic>{
+        'template_name': 'compact',
+        'temp_title': 'ĐƠN TẠM TÍNH',
+        'temp_footer': 'Vui lòng kiểm tra trước khi thanh toán.',
+        'invoice_title': 'HÓA ĐƠN THANH TOÁN',
+        'invoice_footer': 'Cảm ơn quý khách!',
+        'temp_show_logo': '1',
+        'temp_show_branch': '1',
+        'temp_show_address': '1',
+        'temp_show_phone': '1',
+        'temp_show_customer': '1',
+        'temp_show_staff': '1',
         'temp_show_payment_qr': '1',
         'invoice_show_payment_qr': '1',
       },
@@ -6800,84 +6820,74 @@ class NativePrintPage extends StatelessWidget {
     final subtotal = n(order['tongtien'] ?? payment['tongtien']);
     final discount = n(order['giamgia'] ?? payment['giamgia']);
     final due = n(order['phaitra'] ?? payment['phaitra']);
+    final storeName = text(printInfo['store_name']).trim().isEmpty ? 'FIC POS' : text(printInfo['store_name']).trim();
+    final branchName = text(printInfo['branch_name']).trim();
+    final address = text(printInfo['address']).trim();
+    final phone = text(printInfo['phone']).trim();
+    final title = kind == 'temporary'
+        ? (receiptTitle.isEmpty ? 'ĐƠN TẠM TÍNH' : receiptTitle)
+        : (text(template['invoice_title']).trim().isEmpty ? 'HÓA ĐƠN THANH TOÁN' : text(template['invoice_title']).trim());
+    final footer = kind == 'temporary'
+        ? (receiptFooter.isEmpty ? 'Vui lòng kiểm tra trước khi thanh toán.' : receiptFooter)
+        : (text(template['invoice_footer']).trim().isEmpty ? 'Cảm ơn quý khách!' : text(template['invoice_footer']).trim());
+    final code = text(order['madonhang'] ?? payment['madonhang']);
+    final table = text(order['ban'] ?? payment['tenban']);
+    final time = text(order['giovao'] ?? payment['paid_at']);
+    final customer = text(order['khachhang'] ?? payment['ten_khachhang']);
+    final staff = text(order['nhanvien'] ?? payment['nhanvien']);
+
+    Widget metaCell(String label, String value) => RichText(
+      text: TextSpan(style: const TextStyle(color: Colors.black, fontSize: 12), children: [
+        TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
+        TextSpan(text: value.isEmpty ? '-' : value),
+      ]),
+    );
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Center(
-              child: Text('FIC POS', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-            ),
-            Center(
-              child: Text(
-                kind == 'temporary' ? (receiptTitle.isEmpty?'ĐƠN TẠM TÍNH':receiptTitle) : 'HÓA ĐƠN THANH TOÁN',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (text(order['madonhang'] ?? payment['madonhang']).isNotEmpty)
-              line('Mã đơn', text(order['madonhang'] ?? payment['madonhang'])),
-            if (text(order['ban']).isNotEmpty) line('Bàn', text(order['ban'])),
-            if (text(order['khachhang']).isNotEmpty) line('Khách hàng', text(order['khachhang'])),
-            if (text(order['giovao'] ?? payment['paid_at']).isNotEmpty)
-              line('Thời gian', text(order['giovao'] ?? payment['paid_at'])),
-            if (kind != 'temporary' && method().isNotEmpty) line('Thanh toán', method()),
-            const Divider(),
-            ...items.map((e) {
-              final m = e as Map;
-              final name = text(m['ten'] ?? m['tensanpham'] ?? 'Món');
-              final qty = n(m['soluong']).round();
-              final price = n(m['dongia']);
-              final total = n(m['thanhtien']);
-              final tops = List.from(m['toppings'] as List? ?? []);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    Row(
-                      children: [
-                        Expanded(child: Text('$qty × ${money(price)}')),
-                        Text('${money(total > 0 ? total : qty * price)} đ'),
-                      ],
-                    ),
-                    ...tops.map((t) {
-                      final x = t as Map;
-                      return Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: Text(
-                          '+ ${x['ten'] ?? ''} × ${x['soluong'] ?? 1}   ${money(n(x['thanhtien']))} đ',
-                          style: const TextStyle(fontSize: 12, color: Colors.black54),
-                        ),
-                      );
-                    }),
-                    if (text(m['ghichu']).trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: Text(
-                          'Ghi chú: ${m['ghichu']}',
-                          style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            }),
-            const Divider(),
-            line('Tạm tính', '${money(subtotal)} đ'),
-            if (discount > 0) line('Khuyến mãi', '-${money(discount)} đ'),
-            line('PHẢI TRẢ', '${money(due)} đ', strong: true),
-            if (kind != 'temporary' && n(payment['tienkhachdua']) > 0)
-              line('Khách đưa', '${money(n(payment['tienkhachdua']))} đ'),
-            if (kind != 'temporary' && n(payment['tienthua']) > 0)
-              line('Tiền thừa', '${money(n(payment['tienthua']))} đ'),
-            if(kind!='temporary' || tempFlag('temp_show_payment_qr')) qrWidget(due),
-            const SizedBox(height: 10),
-            Center(child:Text(receiptFooter.isNotEmpty?receiptFooter:'Cảm ơn quý khách!',style:const TextStyle(fontWeight:FontWeight.w600),textAlign:TextAlign.center)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Center(child: Text(storeName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900))),
+          if (branchName.isNotEmpty) Center(child: Text(branchName, style: const TextStyle(fontWeight: FontWeight.w700))),
+          if (address.isNotEmpty) Center(child: Text(address, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black54))),
+          if (phone.isNotEmpty) Center(child: Text('ĐT: $phone', style: const TextStyle(fontSize: 11, color: Colors.black54))),
+          const Divider(),
+          Center(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+          if (kind == 'temporary') Center(child: Container(margin: const EdgeInsets.only(top: 5), padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(border: Border.all()), child: const Text('CHƯA THANH TOÁN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)))),
+          const SizedBox(height: 8),
+          if (kind == 'temporary') Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: metaCell('Mã đơn', code)), const SizedBox(width: 8), Expanded(child: metaCell('Bàn', table))]),
+          if (kind == 'temporary') const SizedBox(height: 4),
+          if (kind == 'temporary') Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: metaCell('Giờ vào', time)), const SizedBox(width: 8), Expanded(child: metaCell('Khách', customer.isEmpty ? 'Khách lẻ' : customer))]),
+          if (kind != 'temporary') ...[
+            line('Thời gian', time), line('Đơn hàng', code), line('Bàn', table.isEmpty ? 'Mang về' : table),
+            line('Khách hàng', customer.isEmpty ? 'Khách lẻ' : customer),
+            if (staff.isNotEmpty) line('Nhân viên', staff),
           ],
-        ),
+          const Divider(),
+          Row(children: const [Expanded(flex: 42, child: Text('MÓN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800))), Expanded(flex: 10, child: Text('SL', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800))), Expanded(flex: 22, child: Text('ĐƠN GIÁ', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800))), Expanded(flex: 26, child: Text('THÀNH TIỀN', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)))]),
+          const Divider(height: 10),
+          ...items.map((e) {
+            final m = e as Map; final name = text(m['ten'] ?? m['tensanpham'] ?? 'Món'); final qty = n(m['soluong']).round(); final price = n(m['dongia']); final total = n(m['thanhtien']); final tops = List.from(m['toppings'] as List? ?? []);
+            return Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(flex: 42, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(name, style: const TextStyle(fontWeight: FontWeight.w700)), if (text(m['ghichu']).trim().isNotEmpty) Text('Ghi chú: ${m['ghichu']}', style: const TextStyle(fontSize: 10, color: Colors.black54)), ...tops.map((t) { final x=t as Map; return Text('+ ${x['ten'] ?? ''} ×${x['soluong'] ?? 1} (${money(n(x['thanhtien']))} đ)', style: const TextStyle(fontSize: 10, color: Colors.black54)); })])),
+              Expanded(flex: 10, child: Text('$qty', textAlign: TextAlign.center)),
+              Expanded(flex: 22, child: Text(money(price), textAlign: TextAlign.right)),
+              Expanded(flex: 26, child: Text(money(total > 0 ? total : qty * price), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700))),
+            ]));
+          }),
+          const Divider(),
+          line(kind == 'temporary' ? 'Tạm tính' : 'Tổng tiền', '${money(subtotal)} đ'),
+          if (discount > 0) line('Khuyến mãi', '-${money(discount)} đ'),
+          line('PHẢI TRẢ', '${money(due)} đ', strong: true),
+          if (kind != 'temporary' && method().isNotEmpty) line('Thanh toán', method()),
+          if (kind != 'temporary' && n(payment['tienkhachdua'] ?? payment['tien_khach_dua']) > 0) line('Khách đưa', '${money(n(payment['tienkhachdua'] ?? payment['tien_khach_dua']))} đ'),
+          if (kind != 'temporary' && n(payment['tienthua'] ?? payment['tien_thoi']) > 0) line('Tiền thối', '${money(n(payment['tienthua'] ?? payment['tien_thoi']))} đ'),
+          if (kind != 'temporary' || tempFlag('temp_show_payment_qr')) qrWidget(due),
+          if (kind == 'temporary' && staff.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 7), child: Text('Nhân viên: $staff', style: const TextStyle(fontSize: 11, color: Colors.black54))),
+          const Divider(),
+          Center(child: Text(footer, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black54))),
+          Center(child: Text(kind == 'temporary' ? 'Đơn tạm tính được tạo bởi FIC POS' : 'Hóa đơn được tạo bởi FIC POS', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: Colors.black54))),
+        ]),
       ),
     );
   }
@@ -6889,6 +6899,15 @@ class NativePrintPage extends StatelessWidget {
     final due = n(order['phaitra'] ?? payment['phaitra']);
     final localQr=localQrPayload(due);
     final qr = localQr.isEmpty ? await qrBytes() : null;
+    final storeName = text(printInfo['store_name']).trim().isEmpty ? 'FIC POS' : text(printInfo['store_name']).trim();
+    final branchName = text(printInfo['branch_name']).trim();
+    final address = text(printInfo['address']).trim();
+    final phone = text(printInfo['phone']).trim();
+    final title = kind == 'temporary' ? (receiptTitle.isEmpty ? 'DON TAM TINH' : receiptTitle) : 'HOA DON THANH TOAN';
+    final code = text(order['madonhang'] ?? payment['madonhang']);
+    final table = text(order['ban'] ?? payment['tenban']);
+    final time = text(order['giovao'] ?? payment['paid_at']);
+    final customer = text(order['khachhang'] ?? payment['ten_khachhang']);
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat(
@@ -6899,63 +6918,57 @@ class NativePrintPage extends StatelessWidget {
         build: (_) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            pw.Center(child: pw.Text('FIC POS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
-            pw.Center(child: pw.Text(kind == 'temporary' ? 'DON TAM TINH' : 'HOA DON THANH TOAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))),
-            pw.SizedBox(height: 6),
-            pw.Text('Ma don: ${text(order['madonhang'] ?? payment['madonhang'])}'),
-            if (text(order['ban']).isNotEmpty) pw.Text('Ban: ${text(order['ban'])}'),
-            if (text(order['khachhang']).isNotEmpty) pw.Text('Khach: ${text(order['khachhang'])}'),
-            pw.Divider(),
-            ...items.map((e) {
-              final m = e as Map;
-              final qty = n(m['soluong']).round();
-              final price = n(m['dongia']);
-              final total = n(m['thanhtien']);
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(text(m['ten'] ?? m['tensanpham'] ?? 'Mon'), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [pw.Text('$qty x ${money(price)}'), pw.Text(money(total > 0 ? total : qty * price))],
-                  ),
-                  if (text(m['ghichu']).trim().isNotEmpty)
-                    pw.Text('  Ghi chu: ${text(m['ghichu'])}', style: const pw.TextStyle(fontSize: 8)),
-                  pw.SizedBox(height: 3),
-                ],
-              );
-            }),
-            pw.Divider(),
-            pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Tam tinh'), pw.Text(money(subtotal))]),
-            if (discount > 0)
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Khuyen mai'), pw.Text('-${money(discount)}')]),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('PHAI TRA', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text(money(due), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            if (localQr.isNotEmpty || qr != null) ...[
-              pw.Divider(),
-              pw.Center(child: pw.Text('QUET QR THANH TOAN', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-              pw.SizedBox(height: 4),
-              pw.Center(child: localQr.isNotEmpty
-                ? pw.BarcodeWidget(barcode:pw.Barcode.qrCode(),data:localQr,width:40*PdfPageFormat.mm,height:40*PdfPageFormat.mm)
-                : pw.Image(pw.MemoryImage(qr!), width: 40 * PdfPageFormat.mm, height: 40 * PdfPageFormat.mm)),
-              pw.Center(child: pw.Text('${money(due)} d', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-              if (text(bank['name']).isNotEmpty || text(bank['account_no']).isNotEmpty)
-                pw.Center(child: pw.Text('${text(bank['name'])} - ${text(bank['account_no'])}', style: const pw.TextStyle(fontSize: 8))),
-              if (text(bank['holder']).isNotEmpty)
-                pw.Center(child: pw.Text(text(bank['holder']), style: const pw.TextStyle(fontSize: 8))),
+            pw.Center(child: pw.Text(storeName, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
+            if (branchName.isNotEmpty) pw.Center(child: pw.Text(branchName, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
+            if (address.isNotEmpty) pw.Center(child: pw.Text(address, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
+            if (phone.isNotEmpty) pw.Center(child: pw.Text('DT: $phone', style: const pw.TextStyle(fontSize: 8))),
+            pw.Divider(borderStyle: pw.BorderStyle.dashed),
+            pw.Center(child: pw.Text(title, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))),
+            if (kind == 'temporary') pw.Center(child: pw.Container(margin: const pw.EdgeInsets.only(top: 3), padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2), decoration: pw.BoxDecoration(border: pw.Border.all()), child: pw.Text('CHUA THANH TOAN', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)))),
+            pw.SizedBox(height: 5),
+            if (kind == 'temporary') ...[
+              pw.Row(children: [pw.Expanded(child: pw.Text('Ma don: $code', style: const pw.TextStyle(fontSize: 8))), pw.Expanded(child: pw.Text('Ban: ${table.isEmpty ? '-' : table}', style: const pw.TextStyle(fontSize: 8)))]),
+              pw.Row(children: [pw.Expanded(child: pw.Text('Gio vao: ${time.isEmpty ? '-' : time}', style: const pw.TextStyle(fontSize: 8))), pw.Expanded(child: pw.Text('Khach: ${customer.isEmpty ? 'Khach le' : customer}', style: const pw.TextStyle(fontSize: 8)))]),
+            ] else ...[
+              pw.Text('Thoi gian: $time', style: const pw.TextStyle(fontSize: 8)), pw.Text('Don hang: $code', style: const pw.TextStyle(fontSize: 8)), pw.Text('Ban: ${table.isEmpty ? 'Mang ve' : table}', style: const pw.TextStyle(fontSize: 8)), pw.Text('Khach hang: ${customer.isEmpty ? 'Khach le' : customer}', style: const pw.TextStyle(fontSize: 8)),
             ],
-            pw.SizedBox(height: 8),
-            pw.Center(child: pw.Text('Cam on quy khach!')),
-          ],
+            pw.Divider(borderStyle: pw.BorderStyle.dashed),
+            pw.Row(children: [pw.Expanded(flex: 42, child: pw.Text('MON', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold))), pw.Expanded(flex: 10, child: pw.Text('SL', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold))), pw.Expanded(flex: 22, child: pw.Text('DON GIA', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold))), pw.Expanded(flex: 26, child: pw.Text('THANH TIEN', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))]),
+            pw.Divider(borderStyle: pw.BorderStyle.dashed),
+            ...items.map((e) { final m=e as Map; final qty=n(m['soluong']).round(); final price=n(m['dongia']); final total=n(m['thanhtien']); return pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical:2), child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children:[pw.Expanded(flex:42,child:pw.Text(text(m['ten']??m['tensanpham']??'Mon'),style:const pw.TextStyle(fontSize:8))),pw.Expanded(flex:10,child:pw.Text('$qty',textAlign:pw.TextAlign.center,style:const pw.TextStyle(fontSize:8))),pw.Expanded(flex:22,child:pw.Text(money(price),textAlign:pw.TextAlign.right,style:const pw.TextStyle(fontSize:8))),pw.Expanded(flex:26,child:pw.Text(money(total>0?total:qty*price),textAlign:pw.TextAlign.right,style:const pw.TextStyle(fontSize:8)))])); }),
+            pw.Divider(borderStyle: pw.BorderStyle.dashed),
+            pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text(kind=='temporary'?'Tam tinh':'Tong tien'), pw.Text(money(subtotal))]),
+            if (discount > 0) pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Khuyen mai'), pw.Text('-${money(discount)}')]),
+            pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('PHAI TRA', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)), pw.Text(money(due), style: pw.TextStyle(fontWeight: pw.FontWeight.bold))]),
+            if (localQr.isNotEmpty || qr != null) ...[
+              pw.Divider(borderStyle: pw.BorderStyle.dashed), pw.Center(child: pw.Text('QUET QR THANH TOAN', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))), pw.SizedBox(height: 4),
+              pw.Center(child: localQr.isNotEmpty ? pw.BarcodeWidget(barcode:pw.Barcode.qrCode(),data:localQr,width:38*PdfPageFormat.mm,height:38*PdfPageFormat.mm) : pw.Image(pw.MemoryImage(qr!),width:38*PdfPageFormat.mm,height:38*PdfPageFormat.mm)),
+              pw.Center(child: pw.Text('${money(due)} d', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+              if (text(bank['name']).isNotEmpty || text(bank['account_no']).isNotEmpty) pw.Center(child: pw.Text('${text(bank['name'])} - ${text(bank['account_no'])}', style: const pw.TextStyle(fontSize: 8))), if (text(bank['holder']).isNotEmpty) pw.Center(child: pw.Text(text(bank['holder']), style: const pw.TextStyle(fontSize: 8))),
+            ],
+            pw.Divider(borderStyle: pw.BorderStyle.dashed),
+            pw.Center(child: pw.Text(kind=='temporary' ? (receiptFooter.isNotEmpty?receiptFooter:'Vui long kiem tra truoc khi thanh toan.') : 'Cam on quy khach!', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
+            pw.Center(child: pw.Text(kind=='temporary'?'Don tam tinh duoc tao boi FIC POS':'Hoa don duoc tao boi FIC POS', style: const pw.TextStyle(fontSize: 7))),          ],
         ),
       ),
     );
-    final out=StringBuffer();out.writeln('FIC POS');out.writeln(kind=='temporary'?(receiptTitle.isEmpty?'DON TAM TINH':receiptTitle):'HOA DON THANH TOAN');out.writeln('Ma don: ${text(order['madonhang'] ?? payment['madonhang'])}');if(text(order['ban']).isNotEmpty)out.writeln('Ban: ${text(order['ban'])}');for(final e in items){final m=e as Map;final qty=n(m['soluong']).round();final price=n(m['dongia']);final total=n(m['thanhtien']);out.writeln('${text(m['ten'] ?? m['tensanpham'] ?? 'Mon')}');out.writeln('  $qty x ${money(price)} = ${money(total>0?total:qty*price)}');if(text(m['ghichu']).trim().isNotEmpty)out.writeln('  Ghi chu: ${text(m['ghichu'])}');}out.writeln('----------------');out.writeln('PHAI TRA: ${money(due)} d');out.writeln(receiptFooter.isNotEmpty?receiptFooter:'Cam on quy khach!');
+    final out=StringBuffer();
+    out.writeln(storeName.toUpperCase());
+    if(branchName.isNotEmpty) out.writeln(branchName);
+    if(address.isNotEmpty) out.writeln(address);
+    if(phone.isNotEmpty) out.writeln('DT: $phone');
+    out.writeln('----------------');
+    out.writeln(title);
+    if(kind=='temporary') out.writeln('CHUA THANH TOAN');
+    out.writeln('Ma don: $code');
+    if(table.isNotEmpty) out.writeln('Ban: $table');
+    if(time.isNotEmpty) out.writeln('Thoi gian: $time');
+    out.writeln('----------------');
+    out.writeln('MON                 SL      THANH TIEN');
+    for(final e in items){final m=e as Map;final qty=n(m['soluong']).round();final price=n(m['dongia']);final total=n(m['thanhtien']);out.writeln('${text(m['ten'] ?? m['tensanpham'] ?? 'Mon')}');out.writeln('  $qty x ${money(price)} = ${money(total>0?total:qty*price)}');if(text(m['ghichu']).trim().isNotEmpty)out.writeln('  Ghi chu: ${text(m['ghichu'])}');}
+    out.writeln('----------------');
+    out.writeln('PHAI TRA: ${money(due)} d');
+    out.writeln(kind=='temporary'?(receiptFooter.isNotEmpty?receiptFooter:'Vui long kiem tra truoc khi thanh toan.'):'Cam on quy khach!');
     final direct=await FicPrinterTransport.directPrint(context,'receipt',out.toString(),qrPayload:localQr);
     if(!direct) await Printing.layoutPdf(onLayout: (_) => doc.save(), name: kind == 'temporary' ? 'FIC-POS-Tam-Tinh.pdf' : 'FIC-POS-Hoa-Don.pdf');
   }
