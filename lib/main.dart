@@ -2784,7 +2784,17 @@ class _OrderState extends State<OrderPage> {
         content: Text((method == 'chuyenkhoan' || (method == 'ket_hop' && bankAmount > 0))
             ? 'Hóa đơn $localInvoiceCode đã được tạo trên máy. Thanh toán chuyển khoản được xem là đã hoàn tất và sẽ tự đồng bộ khi có Internet.'
             : 'Hóa đơn $localInvoiceCode đã được tạo trên máy và sẽ tự đồng bộ lên hệ thống khi có Internet.'),
-        actions: [FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong'))],
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () async {
+              Navigator.pop(dc);
+              await _openOfflinePrint('invoice', payment: payment);
+            },
+            icon: const Icon(Icons.print_outlined),
+            label: const Text('In hóa đơn'),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong')),
+        ],
       ),
     );
     // V1.13.0: payment is a terminal action for this order screen.
@@ -3551,7 +3561,74 @@ class _OrderState extends State<OrderPage> {
     await load(madonhang: orderCode);
   }
 
+  Map<String, dynamic> _offlinePrintData(String kind, {Map<String, dynamic>? payment}) {
+    final previewData = effectivePreview ?? OfflinePromotionEngine.evaluate(
+      orderData: orderData ?? _ensureLocalOrderData(),
+      bootstrap: widget.bootstrap,
+    );
+    final order = Map<String, dynamic>.from((orderData?['order'] as Map?) ?? const {});
+    order['madonhang'] ??= orderCode ?? _offlineOrderCode(tableId);
+    order['ban'] ??= orderData?['table']?['tenban'] ?? widget.table['tenban'] ?? widget.table['ten'];
+    order['tongtien'] = num.tryParse('${previewData['tongtien'] ?? _rawTotal()}') ?? _rawTotal();
+    order['giamgia'] = num.tryParse('${previewData['giamgia'] ?? 0}') ?? 0;
+    order['phaitra'] = num.tryParse('${previewData['phaitra'] ?? _rawTotal()}') ?? _rawTotal();
+
+    final rows = mainItems.map((raw) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final qty = num.tryParse('${item['soluong'] ?? 1}') ?? 1;
+      final price = num.tryParse('${item['dongia'] ?? 0}') ?? 0;
+      item['thanhtien'] ??= qty * price;
+      return item;
+    }).toList();
+
+    final bank = widget.bootstrap['bank'] is Map
+        ? Map<String, dynamic>.from(widget.bootstrap['bank'] as Map)
+        : <String, dynamic>{};
+    final print = <String, dynamic>{
+      'payment_qr': '',
+      'show_payment_qr': bank['bin'] != null && '${bank['bin']}'.trim().isNotEmpty
+          && bank['account_no'] != null && '${bank['account_no']}'.trim().isNotEmpty,
+      'bank': bank,
+      'template': <String, dynamic>{
+        'temp_show_payment_qr': '1',
+        'invoice_show_payment_qr': '1',
+      },
+    };
+
+    if (kind == 'temporary') {
+      return <String, dynamic>{
+        'kind': 'temporary',
+        'bill': <String, dynamic>{'order': order, 'items': rows, 'print': print},
+      };
+    }
+
+    final pay = Map<String, dynamic>.from(payment ?? (orderData?['offline_payment'] as Map?) ?? const {});
+    pay['madonhang'] ??= order['madonhang'];
+    pay['tongtien'] ??= order['tongtien'];
+    pay['giamgia'] ??= order['giamgia'];
+    pay['phaitra'] ??= order['phaitra'];
+    return <String, dynamic>{
+      'kind': 'invoice',
+      'payment': pay,
+      'order': order,
+      'items': rows,
+      'print': print,
+    };
+  }
+
+  Future<void> _openOfflinePrint(String kind, {Map<String, dynamic>? payment}) async {
+    if (!mounted) return;
+    final local = _offlinePrintData(kind, payment: payment);
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => NativePrintPage(kind: kind, data: local),
+    ));
+  }
+
   Future<void> openPrint(String kind, String ref) async {
+    if (_offlineNow) {
+      await _openOfflinePrint(kind);
+      return;
+    }
     try {
       final result = await api.post('/print-data', {'kind': kind, 'ref': ref});
       if (!mounted) return;
@@ -4500,7 +4577,16 @@ class _OrderState extends State<OrderPage> {
       return;
     }
     try {
-      final data = await api.get('/orders/$code/temporary-bill');
+      // Offline must never call /temporary-bill. Build the preview from the
+      // locally cached order/items so temporary printing (including VietQR)
+      // remains available without DNS/network access.
+      final Map<String, dynamic> data;
+      if (_offlineNow) {
+        final localPrint = _offlinePrintData('temporary');
+        data = (localPrint['bill'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      } else {
+        data = await api.get('/orders/$code/temporary-bill');
+      }
       if (!mounted) return;
       final order = (data['order'] as Map?)?.cast<String, dynamic>() ?? {};
       final items = (data['items'] as List? ?? const []).cast<dynamic>();
@@ -6418,6 +6504,24 @@ class FicPrinterTransport {
     return Uint8List.fromList(bytes);
   }
 
+  static Uint8List escPosReceipt(String text, {String qrPayload=''}) {
+    final bytes=<int>[...escPosText(text, cut:false)];
+    final qr=qrPayload.trim();
+    if(qr.isNotEmpty) {
+      final data=utf8.encode(qr);
+      final len=data.length+3;
+      bytes.addAll([0x1b,0x61,0x01]); // center
+      bytes.addAll([0x1d,0x28,0x6b,0x04,0x00,0x31,0x41,0x32,0x00]); // QR model 2
+      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]); // module size
+      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x31]); // error correction M
+      bytes.addAll([0x1d,0x28,0x6b,len & 0xff,(len >> 8) & 0xff,0x31,0x50,0x30]);
+      bytes.addAll(data);
+      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x51,0x30,0x0a,0x0a]);
+    }
+    bytes.addAll([0x1d,0x56,0x00]);
+    return Uint8List.fromList(bytes);
+  }
+
   static Future<List<Map<String,dynamic>>> printers({String? role}) async {
     if(api.token==null || api.baseUrl.isEmpty) return [];
     final platform=Platform.isIOS?'ios':'android';
@@ -6435,7 +6539,7 @@ class FicPrinterTransport {
     return rows.firstWhere((e)=>e['mac_dinh']==true || '${e['mac_dinh']}'=='1',orElse:()=>rows.first);
   }
 
-  static Future<bool> directPrint(BuildContext context, String role, String text, {Map<String,dynamic>? printer}) async {
+  static Future<bool> directPrint(BuildContext context, String role, String text, {Map<String,dynamic>? printer, String qrPayload=''}) async {
     final p=printer ?? await preferred(role);
     if(p==null || '${p['ketnoi']}'=='pc') return false;
     final copies=(int.tryParse('${p['so_ban']??1}')??1).clamp(1,10);
@@ -6444,7 +6548,7 @@ class FicPrinterTransport {
         final copyText = role=='kitchen' && copies>1
             ? 'LIEN ${i+1}/$copies - ${i==0?'BEP':'THU NGAN'}\n$text'
             : text;
-        final data=escPosText(copyText);
+        final data=role=='receipt' ? escPosReceipt(copyText, qrPayload:qrPayload) : escPosText(copyText);
         if('${p['ketnoi']}'=='lan'){
           final host='${p['ip']??''}'.trim();
           final port=int.tryParse('${p['port']??9100}')??9100;
@@ -6852,7 +6956,7 @@ class NativePrintPage extends StatelessWidget {
       ),
     );
     final out=StringBuffer();out.writeln('FIC POS');out.writeln(kind=='temporary'?(receiptTitle.isEmpty?'DON TAM TINH':receiptTitle):'HOA DON THANH TOAN');out.writeln('Ma don: ${text(order['madonhang'] ?? payment['madonhang'])}');if(text(order['ban']).isNotEmpty)out.writeln('Ban: ${text(order['ban'])}');for(final e in items){final m=e as Map;final qty=n(m['soluong']).round();final price=n(m['dongia']);final total=n(m['thanhtien']);out.writeln('${text(m['ten'] ?? m['tensanpham'] ?? 'Mon')}');out.writeln('  $qty x ${money(price)} = ${money(total>0?total:qty*price)}');if(text(m['ghichu']).trim().isNotEmpty)out.writeln('  Ghi chu: ${text(m['ghichu'])}');}out.writeln('----------------');out.writeln('PHAI TRA: ${money(due)} d');out.writeln(receiptFooter.isNotEmpty?receiptFooter:'Cam on quy khach!');
-    final direct=await FicPrinterTransport.directPrint(context,'receipt',out.toString());
+    final direct=await FicPrinterTransport.directPrint(context,'receipt',out.toString(),qrPayload:localQr);
     if(!direct) await Printing.layoutPdf(onLayout: (_) => doc.save(), name: kind == 'temporary' ? 'FIC-POS-Tam-Tinh.pdf' : 'FIC-POS-Hoa-Don.pdf');
   }
 
