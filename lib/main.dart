@@ -1401,6 +1401,38 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _cacheRemoteTableSnapshots(Map<String, dynamic> fresh) async {
+    final rawTables = fresh['tables'];
+    if (rawTables is! List) return;
+
+    // Keep the table card and its order detail as one coherent offline snapshot.
+    // A table is not allowed to become "busy" in the cached bootstrap until its
+    // complete order/items snapshot has also been persisted locally.
+    for (final raw in rawTables) {
+      if (raw is! Map) continue;
+      final table = Map<String, dynamic>.from(raw);
+      final id = int.tryParse('${table['id'] ?? 0}') ?? 0;
+      if (id <= 0) continue;
+      final busy = '${table['trangthai'] ?? 1}' == '2';
+      if (!busy) {
+        // Bootstrap is authoritative for a free table. Replace a stale cached
+        // order so an online -> offline transition cannot reopen old items.
+        await OfflineStore.cacheOrder(id, <String, dynamic>{
+          'table': table,
+          'orders': const <dynamic>[],
+          'items': const <dynamic>[],
+        });
+        continue;
+      }
+
+      // Fetch the full order while Internet is still available. If this fails,
+      // _syncTables intentionally aborts before merging the new table state;
+      // the last complete local snapshot remains usable offline.
+      final detail = await api.getBackground('/tables/$id/order');
+      await OfflineStore.cacheOrder(id, Map<String, dynamic>.from(detail));
+    }
+  }
+
   Future<void> _syncTables() async {
     if (ficOfflineMode) return;
     if (_dataSyncing || api.token == null || api.baseUrl.isEmpty) return;
@@ -1423,6 +1455,9 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
       if (needTables) sections.add('tables');
       if (needPromotions) sections.add('promotions');
       final fresh = await api.getBackground('/bootstrap?sections=${sections.join(',')}');
+      if (needTables) {
+        await _cacheRemoteTableSnapshots(Map<String, dynamic>.from(fresh));
+      }
       await _mergeBootstrapSection(fresh);
     } catch (_) {
       // Chỉ kiểm tra version nhỏ; mất mạng không được làm gián đoạn thao tác bán hàng.
@@ -3573,11 +3608,31 @@ class _OrderState extends State<OrderPage> {
     order['giamgia'] = num.tryParse('${previewData['giamgia'] ?? 0}') ?? 0;
     order['phaitra'] = num.tryParse('${previewData['phaitra'] ?? _rawTotal()}') ?? _rawTotal();
 
+    final cachedProducts = ((widget.bootstrap['products'] as List?) ?? const [])
+        .whereType<Map>()
+        .toList();
     final rows = mainItems.map((raw) {
       final item = Map<String, dynamic>.from(raw as Map);
       final qty = num.tryParse('${item['soluong'] ?? 1}') ?? 1;
       final price = num.tryParse('${item['dongia'] ?? 0}') ?? 0;
       item['thanhtien'] ??= qty * price;
+
+      // Order payloads created by Web and by Mobile do not always use the same
+      // product-name key. Preserve the visible order name first, then recover it
+      // from the already-cached menu by product id before the print renderer runs.
+      String productName = '${item['ten'] ?? item['tensanpham'] ?? item['ten_sanpham'] ?? item['name'] ?? ''}'.trim();
+      if (productName.isEmpty) {
+        final productId = '${item['id_sanpham'] ?? item['sanpham_id'] ?? item['product_id'] ?? ''}'.trim();
+        if (productId.isNotEmpty) {
+          for (final product in cachedProducts) {
+            final id = '${product['id'] ?? product['id_sanpham'] ?? product['product_id'] ?? ''}'.trim();
+            if (id != productId) continue;
+            productName = '${product['ten'] ?? product['tensanpham'] ?? product['ten_sanpham'] ?? product['name'] ?? ''}'.trim();
+            if (productName.isNotEmpty) break;
+          }
+        }
+      }
+      if (productName.isNotEmpty) item['ten'] = productName;
       return item;
     }).toList();
 
