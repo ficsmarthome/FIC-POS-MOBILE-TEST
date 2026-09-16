@@ -1,3 +1,13 @@
+# Flutter / Dart generated
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
 
+# IDE
+.idea/
+*.iml
+
+# Android signing - NEVER COMMIT
 android/key.properties
 android/ficpos-upload-key.jks

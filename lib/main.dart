@@ -35,7 +35,7 @@ int maxInt(int a, int b) => a > b ? a : b;
 Map<String,dynamic> ficMapOrEmpty(dynamic value) => value is Map ? value.map((k,v)=>MapEntry('$k',v)) : <String,dynamic>{};
 
 // Version hiển thị tập trung tại một hằng số UI. Giữ đồng bộ với pubspec.yaml khi phát hành.
-const String ficPosMobileVersion = '1.14.0+93 TEST';
+const String ficPosMobileVersion = '1.13.33+92 TEST';
 
 // TEST ONLY: bypass TLS certificate errors only for *.test.ficpos.com.
 // Production ficpos.com remains subject to normal certificate validation.
@@ -648,11 +648,23 @@ class _LoginState extends State<LoginPage> {
       if (slug.isEmpty) throw Exception('Vui lòng nhập mã cửa hàng');
       api.baseUrl = 'https://$slug.test.ficpos.com';
       try {
-        final response = await api.post('/login', {
-          'account': account.text.trim(),
-          'password': pass.text,
-          'device_name': 'FIC POS Mobile',
-        }, timeout: const Duration(seconds: 4));
+        Map<String, dynamic>? response;
+        Object? lastOnlineError;
+        for (var attempt = 0; attempt < 2; attempt++) {
+          try {
+            response = await api.post('/login', {
+              'account': account.text.trim(),
+              'password': pass.text,
+              'device_name': 'FIC POS Mobile',
+            }, timeout: const Duration(seconds: 8));
+            break;
+          } catch (e) {
+            if (!_isNetworkError(e)) rethrow;
+            lastOnlineError = e;
+            if (attempt == 0) await Future.delayed(const Duration(milliseconds: 800));
+          }
+        }
+        if (response == null) throw lastOnlineError ?? Exception('Không thể kết nối máy chủ.');
         api.token = response['token'];
         ficOfflineMode = false;
         final prefs = await SharedPreferences.getInstance();
@@ -8197,7 +8209,7 @@ class _QrRequestPageState extends State<QrRequestPage> {
       };
 
       if (!mounted) return;
-      await Navigator.pushReplacement(
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => OrderPage(
@@ -8206,6 +8218,7 @@ class _QrRequestPageState extends State<QrRequestPage> {
           ),
         ),
       );
+      if (mounted) await load();
     } catch (err) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
