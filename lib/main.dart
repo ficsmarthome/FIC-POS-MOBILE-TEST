@@ -583,9 +583,27 @@ class _AppState extends State<FicPosApp> {
           useMaterial3: true,
           colorSchemeSeed: const Color(0xff0875d1),
           scaffoldBackgroundColor: const Color(0xfff5f6f8),
-          inputDecorationTheme: const InputDecorationTheme(
-            border: OutlineInputBorder(),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            floatingLabelBehavior: FloatingLabelBehavior.auto,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xffcfd5df))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xff0875d1), width: 1.5)),
+            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent)),
           ),
+          dialogTheme: DialogThemeData(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          ),
+          cardTheme: CardThemeData(
+            elevation: 0,
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xffe1e5eb))),
+          ),
+          filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(minimumSize: const Size(0, 46), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
+          outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(minimumSize: const Size(0, 46), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
         ),
         home: !ready
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
@@ -5761,13 +5779,13 @@ class _PurchasesPageState extends State<PurchasesPage> {
                     }).toList(),
                     onChanged: (v) => setD(() => supplier = v),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 14),
                   ...lines.asMap().entries.map((entry) {
                     final i = entry.key;
                     final l = entry.value;
                     return Card(
                       child: Padding(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(12),
                         child: Column(
                           children: [
                             DropdownButtonFormField<dynamic>(
@@ -5782,7 +5800,9 @@ class _PurchasesPageState extends State<PurchasesPage> {
                                 l['price'].text = '${(v as Map)['giagoc'] ?? 0}';
                               }),
                             ),
+                            const SizedBox(height: 12),
                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(child: TextField(controller: l['qty'], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: const InputDecoration(labelText: 'SL'))),
                                 const SizedBox(width: 8),
@@ -5807,8 +5827,9 @@ class _PurchasesPageState extends State<PurchasesPage> {
                     icon: const Icon(Icons.add),
                     label: const Text('Thêm dòng'),
                   ),
+                  const SizedBox(height: 6),
                   TextField(controller: paid, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Đã thanh toán')),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: paymentMethod,
                     decoration: const InputDecoration(labelText: 'Phương thức thanh toán'),
@@ -5818,7 +5839,8 @@ class _PurchasesPageState extends State<PurchasesPage> {
                     ],
                     onChanged: (v) => setD(() => paymentMethod = v ?? 'tienmat'),
                   ),
-                  TextField(controller: note, decoration: const InputDecoration(labelText: 'Ghi chú')),
+                  const SizedBox(height: 12),
+                  TextField(controller: note, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Ghi chú', alignLabelWithHint: true)),
                 ],
               ),
             ),
@@ -6575,6 +6597,35 @@ class _NativeModulePageState extends State<NativeModulePage> {
 class FicPrinterTransport {
   static const MethodChannel _channel = MethodChannel('fic_pos/printer');
 
+  static String get _localKey => 'fic_printers_local::${api.baseUrl.isEmpty ? 'device' : api.baseUrl}';
+  static String get _manageKey => '${_localKey}::can_manage';
+
+  static Future<List<Map<String,dynamic>>> localPrinters({String? role}) async {
+    final prefs=await SharedPreferences.getInstance();
+    final raw=prefs.getString(_localKey);
+    if(raw==null || raw.isEmpty) return [];
+    try {
+      final decoded=jsonDecode(raw);
+      final rows=List.from(decoded is List ? decoded : const []); 
+      return rows.whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).where((e)=>role==null || '${e['loai']}'==role).toList();
+    } catch(_) { return []; }
+  }
+
+  static Future<void> saveLocalPrinters(List<Map<String,dynamic>> rows) async {
+    final prefs=await SharedPreferences.getInstance();
+    await prefs.setString(_localKey,jsonEncode(rows));
+  }
+
+  static Future<bool> localCanManage() async {
+    final prefs=await SharedPreferences.getInstance();
+    return prefs.getBool(_manageKey) ?? true;
+  }
+
+  static Future<void> saveLocalCanManage(bool value) async {
+    final prefs=await SharedPreferences.getInstance();
+    await prefs.setBool(_manageKey,value);
+  }
+
   static String ascii(String input) {
     const a='àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ';
     const b='aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyydAAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYD';
@@ -6585,138 +6636,83 @@ class FicPrinterTransport {
 
   static Uint8List escPosText(String text, {bool cut=true}) {
     final bytes=<int>[0x1b,0x40,0x1b,0x61,0x00];
-    bytes.addAll(utf8.encode(ascii(text)));
-    bytes.addAll([0x0a,0x0a,0x0a]);
-    if(cut) bytes.addAll([0x1d,0x56,0x00]);
-    return Uint8List.fromList(bytes);
+    bytes.addAll(utf8.encode(ascii(text))); bytes.addAll([0x0a,0x0a,0x0a]);
+    if(cut) bytes.addAll([0x1d,0x56,0x00]); return Uint8List.fromList(bytes);
   }
 
   static Uint8List escPosReceipt(String text, {String qrPayload=''}) {
-    final bytes=<int>[...escPosText(text, cut:false)];
-    final qr=qrPayload.trim();
-    if(qr.isNotEmpty) {
-      final data=utf8.encode(qr);
-      final len=data.length+3;
-      bytes.addAll([0x1b,0x61,0x01]); // center
-      bytes.addAll([0x1d,0x28,0x6b,0x04,0x00,0x31,0x41,0x32,0x00]); // QR model 2
-      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]); // module size
-      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x31]); // error correction M
-      bytes.addAll([0x1d,0x28,0x6b,len & 0xff,(len >> 8) & 0xff,0x31,0x50,0x30]);
-      bytes.addAll(data);
-      bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x51,0x30,0x0a,0x0a]);
-    }
-    bytes.addAll([0x1d,0x56,0x00]);
-    return Uint8List.fromList(bytes);
+    final bytes=<int>[...escPosText(text, cut:false)]; final qr=qrPayload.trim();
+    if(qr.isNotEmpty){final data=utf8.encode(qr);final len=data.length+3;bytes.addAll([0x1b,0x61,0x01]);bytes.addAll([0x1d,0x28,0x6b,0x04,0x00,0x31,0x41,0x32,0x00]);bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]);bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x31]);bytes.addAll([0x1d,0x28,0x6b,len&0xff,(len>>8)&0xff,0x31,0x50,0x30]);bytes.addAll(data);bytes.addAll([0x1d,0x28,0x6b,0x03,0x00,0x31,0x51,0x30,0x0a,0x0a]);}
+    bytes.addAll([0x1d,0x56,0x00]); return Uint8List.fromList(bytes);
   }
 
   static Future<List<Map<String,dynamic>>> printers({String? role}) async {
-    if(api.token==null || api.baseUrl.isEmpty) return [];
+    // Local-first: printing must never depend on Internet.
+    final local=await localPrinters(role:role);
+    if(api.token==null || api.baseUrl.isEmpty) return local;
     final platform=Platform.isIOS?'ios':'android';
     try {
       final r=await api.get('/printers?platform=$platform');
       final d=r['data'] is Map ? Map<String,dynamic>.from(r['data'] as Map) : r;
-      final rows=List.from(d['items'] as List? ?? const []);
-      return rows.where((e)=>e is Map && (role==null || '${e['loai']}'==role)).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-    } catch(_) { return []; }
+      final all=List.from(d['items'] as List? ?? const []).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
+      await saveLocalPrinters(all); await saveLocalCanManage(d['can_manage']==true);
+      return all.where((e)=>role==null || '${e['loai']}'==role).toList();
+    } catch(_) { return local; }
   }
 
   static Future<Map<String,dynamic>?> preferred(String role) async {
-    final rows=await printers(role:role);
-    if(rows.isEmpty) return null;
+    final rows=await printers(role:role); if(rows.isEmpty)return null;
     return rows.firstWhere((e)=>e['mac_dinh']==true || '${e['mac_dinh']}'=='1',orElse:()=>rows.first);
   }
 
-  static Future<bool> directPrint(BuildContext context, String role, String text, {Map<String,dynamic>? printer, String qrPayload=''}) async {
-    final p=printer ?? await preferred(role);
-    if(p==null || '${p['ketnoi']}'=='pc') return false;
+  static Future<bool> directPrint(BuildContext context,String role,String text,{Map<String,dynamic>? printer,String qrPayload=''}) async {
+    final p=printer ?? await preferred(role); if(p==null || '${p['ketnoi']}'=='pc')return false;
     final copies=(int.tryParse('${p['so_ban']??1}')??1).clamp(1,10);
-    try {
-      for(var i=0;i<copies;i++){
-        final copyText = role=='kitchen' && copies>1
-            ? 'LIEN ${i+1}/$copies - ${i==0?'BEP':'THU NGAN'}\n$text'
-            : text;
-        final data=role=='receipt' ? escPosReceipt(copyText, qrPayload:qrPayload) : escPosText(copyText);
-        if('${p['ketnoi']}'=='lan'){
-          final host='${p['ip']??''}'.trim();
-          final port=int.tryParse('${p['port']??9100}')??9100;
-          if(host.isEmpty) throw Exception('Máy in LAN chưa có địa chỉ IP.');
-          final socket=await Socket.connect(host,port,timeout:const Duration(seconds:4));
-          socket.add(data); await socket.flush(); await socket.close();
-        } else if('${p['ketnoi']}'=='bluetooth'){
-          if(Platform.isIOS) throw Exception('Máy in Bluetooth này chưa xác nhận tương thích iOS. Hãy dùng LAN/IP hoặc AirPrint cho iPhone/iPad.');
-          final address='${p['bluetooth_address']??''}'.trim();
-          if(address.isEmpty) throw Exception('Máy in Bluetooth chưa có địa chỉ thiết bị.');
-          await _channel.invokeMethod('printBluetooth', {'address':address,'bytes':data});
-        }
-      }
-      if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã gửi lệnh in tới ${p['ten']??'máy in'}')));
-      return true;
-    } catch(e) {
-      if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));
-      return true; // đã chọn direct printer: không tự in trùng qua system dialog
-    }
+    try { for(var i=0;i<copies;i++){final copyText=role=='kitchen'&&copies>1?'LIEN ${i+1}/$copies - ${i==0?'BEP':'THU NGAN'}\n$text':text;final data=role=='receipt'?escPosReceipt(copyText,qrPayload:qrPayload):escPosText(copyText);
+      if('${p['ketnoi']}'=='lan'){final host='${p['ip']??''}'.trim();final port=int.tryParse('${p['port']??9100}')??9100;if(host.isEmpty)throw Exception('Máy in LAN chưa có địa chỉ IP.');final socket=await Socket.connect(host,port,timeout:const Duration(seconds:4));socket.add(data);await socket.flush();await socket.close();}
+      else if('${p['ketnoi']}'=='bluetooth'){if(Platform.isIOS)throw Exception('Máy in Bluetooth này chưa xác nhận tương thích iOS. Hãy dùng LAN/IP hoặc AirPrint cho iPhone/iPad.');final address='${p['bluetooth_address']??''}'.trim();if(address.isEmpty)throw Exception('Chưa chọn máy in Bluetooth. Hãy quét và chọn thiết bị.');await _channel.invokeMethod('printBluetooth',{'address':address,'bytes':data});}
+    } if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã gửi lệnh in tới ${p['ten']??'máy in'}')));return true;
+    }catch(e){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));return true;}
   }
 
-  static Future<List<Map<String,dynamic>>> bondedBluetooth() async {
-    if(!Platform.isAndroid) return [];
-    try {
-      final raw=await _channel.invokeMethod<List<dynamic>>('bondedBluetooth');
-      return List.from(raw??const []).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
-    } catch(_) { return []; }
-  }
-
-  static Future<List<Map<String,dynamic>>> scanBluetooth() async {
-    if(!Platform.isAndroid) return [];
-    try {
-      final raw=await _channel.invokeMethod<List<dynamic>>('scanBluetooth');
-      final rows=List.from(raw??const []).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
-      if(rows.isNotEmpty) return rows;
-    } catch(_) {}
-    return bondedBluetooth();
-  }
+  static Future<List<Map<String,dynamic>>> bondedBluetooth() async {if(!Platform.isAndroid)return[];try{final raw=await _channel.invokeMethod<List<dynamic>>('bondedBluetooth');return List.from(raw??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();}catch(_){return[];}}
+  static Future<List<Map<String,dynamic>>> scanBluetooth() async {if(!Platform.isAndroid)return[];try{final raw=await _channel.invokeMethod<List<dynamic>>('scanBluetooth');final rows=List.from(raw??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();if(rows.isNotEmpty)return rows;}catch(_){}return bondedBluetooth();}
 }
 
-class PrinterSettingsPage extends StatefulWidget {
-  const PrinterSettingsPage({super.key});
-  @override State<PrinterSettingsPage> createState()=>_PrinterSettingsPageState();
-}
+class PrinterSettingsPage extends StatefulWidget {const PrinterSettingsPage({super.key});@override State<PrinterSettingsPage> createState()=>_PrinterSettingsPageState();}
 class _PrinterSettingsPageState extends State<PrinterSettingsPage>{
-  bool loading=true, canManage=false; List<Map<String,dynamic>> rows=[];
+  bool loading=true,canManage=true,syncing=false;List<Map<String,dynamic>> rows=[];
   @override void initState(){super.initState();load();}
-  Future<void> load() async{
-    setState(()=>loading=true);
-    try{
-      final platform=Platform.isIOS?'ios':'android';
-      final r=await api.get('/printers?platform=$platform'); final d=r['data'] is Map?Map<String,dynamic>.from(r['data'] as Map):r;
-      rows=List.from(d['items'] as List? ?? const []).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList(); canManage=d['can_manage']==true;
-    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));}
-    if(mounted)setState(()=>loading=false);
-  }
+  Future<void> load()async{if(mounted)setState(()=>loading=true);rows=await FicPrinterTransport.localPrinters();canManage=await FicPrinterTransport.localCanManage();if(mounted)setState(()=>loading=false);await syncFromServer(silent:true);}
+  Future<void> syncFromServer({bool silent=false})async{if(api.token==null||api.baseUrl.isEmpty)return;if(mounted)setState(()=>syncing=true);try{final platform=Platform.isIOS?'ios':'android';final r=await api.get('/printers?platform=$platform');final d=r['data'] is Map?Map<String,dynamic>.from(r['data'] as Map):r;rows=List.from(d['items'] as List? ?? const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();canManage=d['can_manage']==true;await FicPrinterTransport.saveLocalPrinters(rows);await FicPrinterTransport.saveLocalCanManage(canManage);if(mounted)setState((){});}catch(_){if(!silent&&mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Không có Internet. Đang dùng cấu hình máy in lưu trên điện thoại.')));}finally{if(mounted)setState(()=>syncing=false);}}
   String role(Map p)=>switch('${p['loai']}'){'receipt'=>'Hóa đơn','kitchen'=>'Bếp / pha chế','label'=>'Nhãn',_=>'Máy in'};
   String conn(Map p)=>switch('${p['ketnoi']}'){'pc'=>'USB / PC','lan'=>'LAN / IP','bluetooth'=>'Bluetooth',_=>'${p['ketnoi']}'};
-  String desc(Map p){final base='${role(p)} • ${conn(p)} • ${p['kho_giay']??''}';return '${p['ketnoi']}'=='lan'?'$base • ${p['ip']??''}:${p['port']??9100}':base;}
-  Future<void> edit([Map<String,dynamic>? item]) async{
-    final name=TextEditingController(text:'${item?['ten']??''}'); final ip=TextEditingController(text:'${item?['ip']??''}'); final port=TextEditingController(text:'${item?['port']??9100}');
-    final btName=TextEditingController(text:'${item?['bluetooth_name']??''}'); final btAddr=TextEditingController(text:'${item?['bluetooth_address']??''}'); final paper=TextEditingController(text:'${item?['kho_giay']??80}'); final copies=TextEditingController(text:'${item?['so_ban']??1}');
-    var type='${item?['ketnoi']??'lan'}', roleV='${item?['loai']??'receipt'}', platform='${item?['nen_tang']??'mobile'}'; var def=item?['mac_dinh']==true||'${item?['mac_dinh']}'=='1'; var active=item==null || item['trangthai']==true||'${item['trangthai']}'=='1';
+  String desc(Map p){final base='${role(p)} • ${conn(p)} • ${p['kho_giay']??''}';return '${p['ketnoi']}'=='lan'?'$base • ${p['ip']??''}:${p['port']??9100}':'${p['ketnoi']}'=='bluetooth'?'$base • ${p['bluetooth_name']??''}':base;}
+  Future<Map<String,dynamic>?> _pickBluetooth(BuildContext dc)async{final devs=await FicPrinterTransport.scanBluetooth();if(!dc.mounted)return null;return showDialog<Map<String,dynamic>>(context:dc,builder:(x)=>SimpleDialog(title:const Text('Quét máy in Bluetooth'),children:devs.isEmpty?[const Padding(padding:EdgeInsets.all(18),child:Text('Chưa tìm thấy thiết bị. Hãy bật Bluetooth và máy in rồi quét lại.'))]:devs.map((d)=>SimpleDialogOption(onPressed:()=>Navigator.pop(x,d),child:ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.print_outlined),title:Text('${d['name']??'Máy in Bluetooth'}'),subtitle:Text('${d['address']??''}')))).toList()));}
+  Future<void> edit([Map<String,dynamic>? item])async{
+    final name=TextEditingController(text:'${item?['ten']??''}'),ip=TextEditingController(text:'${item?['ip']??''}'),port=TextEditingController(text:'${item?['port']??9100}'),paper=TextEditingController(text:'${item?['kho_giay']??80}'),copies=TextEditingController(text:'${item?['so_ban']??1}');
+    var btName='${item?['bluetooth_name']??''}',btAddr='${item?['bluetooth_address']??''}',type='${item?['ketnoi']??'lan'}',roleV='${item?['loai']??'receipt'}',platform='${item?['nen_tang']??'mobile'}';var def=item?['mac_dinh']==true||'${item?['mac_dinh']}'=='1',active=item==null||item['trangthai']==true||'${item['trangthai']}'=='1';
     final saved=await showDialog<bool>(context:context,builder:(dc)=>StatefulBuilder(builder:(dc,setD)=>AlertDialog(title:Text(item==null?'Thêm máy in':'Sửa máy in'),content:SizedBox(width:520,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-      TextField(controller:name,decoration:const InputDecoration(labelText:'Tên máy in')),
-      DropdownButtonFormField<String>(value:type,decoration:const InputDecoration(labelText:'Kết nối'),items:const [DropdownMenuItem(value:'pc',child:Text('USB / PC')),DropdownMenuItem(value:'lan',child:Text('LAN / IP')),DropdownMenuItem(value:'bluetooth',child:Text('Bluetooth'))],onChanged:(v)async{final next=v??'lan';setD(()=>type=next);if(next=='bluetooth'&&Platform.isAndroid){final devs=await FicPrinterTransport.scanBluetooth();if(!dc.mounted)return;final picked=await showDialog<Map<String,dynamic>>(context:dc,builder:(x)=>SimpleDialog(title:const Text('Chọn máy in Bluetooth'),children:devs.isEmpty?[const Padding(padding:EdgeInsets.all(16),child:Text('Chưa tìm thấy thiết bị Bluetooth. Hãy bật máy in và Bluetooth rồi thử lại.'))]:devs.map((d)=>SimpleDialogOption(onPressed:()=>Navigator.pop(x,d),child:Text('${d['name']??'Bluetooth'}\n${d['address']??''}'))).toList()));if(picked!=null){btName.text='${picked['name']??''}';btAddr.text='${picked['address']??''}';setD((){});}}}),
-      DropdownButtonFormField<String>(value:roleV,decoration:const InputDecoration(labelText:'Dùng để in'),items:const [DropdownMenuItem(value:'receipt',child:Text('Hóa đơn')),DropdownMenuItem(value:'kitchen',child:Text('Bếp / pha chế')),DropdownMenuItem(value:'label',child:Text('Nhãn'))],onChanged:(v)=>setD(()=>roleV=v??'receipt')),
-      DropdownButtonFormField<String>(value:platform,decoration:const InputDecoration(labelText:'Nền tảng'),items:const [DropdownMenuItem(value:'all',child:Text('Tất cả')),DropdownMenuItem(value:'mobile',child:Text('Android + iOS')),DropdownMenuItem(value:'android',child:Text('Android')),DropdownMenuItem(value:'ios',child:Text('iOS')),DropdownMenuItem(value:'web',child:Text('Web'))],onChanged:(v)=>setD(()=>platform=v??'mobile')),
-      TextField(controller:paper,decoration:const InputDecoration(labelText:'Khổ giấy / nhãn (80, 58, 50x30...)')),
-      if(type=='lan') ...[TextField(controller:ip,decoration:const InputDecoration(labelText:'IP máy in')),TextField(controller:port,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Port (thường 9100)'))],
-      TextField(controller:copies,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Số bản in (1-10)')),if(type=='bluetooth') ...[TextField(controller:btName,decoration:const InputDecoration(labelText:'Tên Bluetooth')),TextField(controller:btAddr,decoration:const InputDecoration(labelText:'Địa chỉ Bluetooth / MAC')),if(Platform.isAndroid) TextButton.icon(onPressed:()async{final devs=await FicPrinterTransport.scanBluetooth();if(!dc.mounted)return;final picked=await showDialog<Map<String,dynamic>>(context:dc,builder:(x)=>SimpleDialog(title:const Text('Chọn máy in Bluetooth'),children:devs.isEmpty?[const Padding(padding:EdgeInsets.all(16),child:Text('Chưa tìm thấy thiết bị Bluetooth. Hãy bật máy in và Bluetooth rồi thử lại.'))]:devs.map((d)=>SimpleDialogOption(onPressed:()=>Navigator.pop(x,d),child:Text('${d['name']??'Bluetooth'}\n${d['address']??''}'))).toList()));if(picked!=null){btName.text='${picked['name']??''}';btAddr.text='${picked['address']??''}';setD((){});}},icon:const Icon(Icons.bluetooth_searching),label:const Text('Quét & chọn máy in'))],
-      CheckboxListTile(value:def,onChanged:(v)=>setD(()=>def=v??false),title:const Text('Máy mặc định'),contentPadding:EdgeInsets.zero),CheckboxListTile(value:active,onChanged:(v)=>setD(()=>active=v??true),title:const Text('Đang sử dụng'),contentPadding:EdgeInsets.zero),
-    ]))),actions:[TextButton(onPressed:()=>Navigator.pop(dc,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(dc,true),child:const Text('Lưu'))])));
-    if(saved!=true)return;
-    try{await api.post('/printers',{'id':item?['id'],'ten':name.text.trim(),'ketnoi':type,'loai':roleV,'nen_tang':platform,'kho_giay':paper.text.trim().isEmpty?'80':paper.text.trim(),'ip':ip.text.trim(),'port':int.tryParse(port.text)??9100,'bluetooth_name':btName.text.trim(),'bluetooth_address':btAddr.text.trim(),'so_ban':(int.tryParse(copies.text)??1).clamp(1,10),'mac_dinh':def,'trangthai':active});await load();}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));}
+      TextField(controller:name,decoration:const InputDecoration(labelText:'Tên máy in')),const SizedBox(height:12),
+      DropdownButtonFormField<String>(value:type,decoration:const InputDecoration(labelText:'Kết nối'),items:[const DropdownMenuItem(value:'lan',child:Text('LAN / IP')),if(Platform.isAndroid)const DropdownMenuItem(value:'bluetooth',child:Text('Bluetooth')),const DropdownMenuItem(value:'pc',child:Text('USB / PC'))],onChanged:(v)async{type=v??'lan';setD((){});if(type=='bluetooth'&&Platform.isAndroid){final picked=await _pickBluetooth(dc);if(picked!=null){btName='${picked['name']??''}';btAddr='${picked['address']??''}';if(name.text.trim().isEmpty)name.text=btName;setD((){});}}}),const SizedBox(height:12),
+      DropdownButtonFormField<String>(value:roleV,decoration:const InputDecoration(labelText:'Dùng để in'),items:const[DropdownMenuItem(value:'receipt',child:Text('Hóa đơn')),DropdownMenuItem(value:'kitchen',child:Text('Bếp / pha chế')),DropdownMenuItem(value:'label',child:Text('Nhãn'))],onChanged:(v)=>setD(()=>roleV=v??'receipt')),const SizedBox(height:12),
+      TextField(controller:paper,decoration:const InputDecoration(labelText:'Khổ giấy / nhãn')),const SizedBox(height:12),
+      if(type=='lan')...[TextField(controller:ip,decoration:const InputDecoration(labelText:'IP máy in',hintText:'Ví dụ 192.168.1.100')),const SizedBox(height:12),TextField(controller:port,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Port',hintText:'Thường là 9100')),const SizedBox(height:12)],
+      if(type=='bluetooth')...[Container(width:double.infinity,padding:const EdgeInsets.all(14),decoration:BoxDecoration(border:Border.all(color:const Color(0xffcfd5df)),borderRadius:BorderRadius.circular(12)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(btName.isEmpty?'Chưa chọn máy in Bluetooth':btName,style:const TextStyle(fontWeight:FontWeight.w700)),if(btAddr.isNotEmpty)Text(btAddr,style:const TextStyle(color:Colors.black54)),const SizedBox(height:8),FilledButton.icon(onPressed:()async{final picked=await _pickBluetooth(dc);if(picked!=null){btName='${picked['name']??''}';btAddr='${picked['address']??''}';if(name.text.trim().isEmpty)name.text=btName;setD((){});}},icon:const Icon(Icons.bluetooth_searching),label:Text(btAddr.isEmpty?'Quét & chọn máy in':'Quét lại / đổi máy'))])),const SizedBox(height:12)],
+      TextField(controller:copies,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Số bản in',hintText:'1 - 10')),CheckboxListTile(value:def,onChanged:(v)=>setD(()=>def=v??false),title:const Text('Máy mặc định'),contentPadding:EdgeInsets.zero),CheckboxListTile(value:active,onChanged:(v)=>setD(()=>active=v??true),title:const Text('Đang sử dụng'),contentPadding:EdgeInsets.zero),
+    ]))),actions:[TextButton(onPressed:()=>Navigator.pop(dc,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(dc,true),child:const Text('Lưu trên máy'))])));
+    if(saved!=true)return;if(type=='bluetooth'&&btAddr.isEmpty){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Hãy quét và chọn máy in Bluetooth.')));return;}
+    final row=<String,dynamic>{if(item!=null)...item,'local_id':item?['local_id']??item?['id']??DateTime.now().microsecondsSinceEpoch,'id':item?['id'],'ten':name.text.trim().isEmpty?(type=='bluetooth'?(btName.isEmpty?'Máy in Bluetooth':btName):'Máy in LAN'):name.text.trim(),'ketnoi':type,'loai':roleV,'nen_tang':platform,'kho_giay':paper.text.trim().isEmpty?'80':paper.text.trim(),'ip':ip.text.trim(),'port':int.tryParse(port.text)??9100,'bluetooth_name':btName,'bluetooth_address':btAddr,'so_ban':(int.tryParse(copies.text)??1).clamp(1,10),'mac_dinh':def,'trangthai':active};
+    final key='${item?['local_id']??item?['id']??''}';var idx=rows.indexWhere((e)=>'${e['local_id']??e['id']??''}'==key&&key.isNotEmpty);if(idx>=0)rows[idx]=row;else rows.add(row);if(def){for(final r in rows){if(!identical(r,row))r['mac_dinh']=false;}}await FicPrinterTransport.saveLocalPrinters(rows);if(mounted)setState((){});
+    // Server sync is best-effort only. Local configuration remains usable if offline.
+    if(api.token!=null&&api.baseUrl.isNotEmpty){try{await api.post('/printers',row);await syncFromServer(silent:true);}catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu máy in trên điện thoại. Sẽ đồng bộ máy chủ khi có Internet.')));}}
   }
-  Future<void> test(Map<String,dynamic> p)async{final ok=await FicPrinterTransport.directPrint(context,'${p['loai']}','FIC POS\nIN THU MAY IN\n${p['ten']}\n${DateTime.now()}\n',printer:p);if(!ok && mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('USB/PC sử dụng hộp thoại in của hệ điều hành khi in hóa đơn/nhãn.')));}
-  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Cài đặt máy in'),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),floatingActionButton:canManage?FloatingActionButton.extended(onPressed:()=>edit(),icon:const Icon(Icons.add),label:const Text('Thêm máy')):null,body:loading?const Center(child:CircularProgressIndicator()):ListView(padding:const EdgeInsets.all(14),children:[
-    const Card(child:Padding(padding:EdgeInsets.all(14),child:Text('Cấu hình đồng bộ theo chi nhánh. LAN/IP hoạt động trực tiếp trên Android/iOS khi cùng mạng. Bluetooth trực tiếp hiện hỗ trợ Android với máy đã ghép đôi; iOS nên ưu tiên LAN/IP hoặc AirPrint. USB/PC giữ luồng in hệ điều hành hiện tại.'))),
-    ...rows.map((p)=>Card(child:ListTile(leading:Icon('${p['ketnoi']}'=='lan'?Icons.lan:'${p['ketnoi']}'=='bluetooth'?Icons.bluetooth:Icons.print),title:Text('${p['ten']}${p['mac_dinh']==true||'${p['mac_dinh']}'=='1'?' • Mặc định':''}'),subtitle:Text(desc(p)),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(tooltip:'In thử',onPressed:()=>test(p),icon:const Icon(Icons.print_outlined)),if(canManage)IconButton(tooltip:'Sửa',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)),if(canManage)IconButton(tooltip:'Xóa',onPressed:()async{await api.delete('/printers/${p['id']}');await load();},icon:const Icon(Icons.delete_outline))])))),
-    if(rows.isEmpty)const Padding(padding:EdgeInsets.all(30),child:Center(child:Text('Chưa cấu hình máy in cho nền tảng này.')))
+  Future<void> remove(Map<String,dynamic> p)async{final id='${p['local_id']??p['id']??''}';rows.removeWhere((e)=>'${e['local_id']??e['id']??''}'==id);await FicPrinterTransport.saveLocalPrinters(rows);if(mounted)setState((){});final serverId=p['id'];if(serverId!=null&&api.token!=null&&api.baseUrl.isNotEmpty){try{await api.delete('/printers/$serverId');}catch(_){}}}
+  Future<void> test(Map<String,dynamic> p)async{final ok=await FicPrinterTransport.directPrint(context,'${p['loai']}','FIC POS\nIN THU MAY IN\n${p['ten']}\n${DateTime.now()}\n',printer:p);if(!ok&&mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('USB/PC sử dụng hộp thoại in của hệ điều hành.')));}
+  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Cài đặt máy in'),actions:[if(syncing)const Padding(padding:EdgeInsets.all(14),child:SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)))else IconButton(onPressed:()=>syncFromServer(),icon:const Icon(Icons.sync))]),floatingActionButton:canManage?FloatingActionButton.extended(onPressed:()=>edit(),icon:const Icon(Icons.add),label:const Text('Thêm máy')):null,body:loading?const Center(child:CircularProgressIndicator()):ListView(padding:const EdgeInsets.all(14),children:[
+    Card(child:Padding(padding:const EdgeInsets.all(14),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[const Icon(Icons.offline_bolt_outlined),const SizedBox(width:10),Expanded(child:Text(Platform.isAndroid?'Máy in được lưu trên điện thoại và in trực tiếp, không cần Internet. Bluetooth: quét & chọn thiết bị. LAN/IP: in khi điện thoại và máy in cùng mạng. Khi có Internet, cấu hình sẽ tự đồng bộ máy chủ.':'Máy in được lưu trên thiết bị. LAN/IP hoạt động trực tiếp khi cùng mạng; iPhone/iPad ưu tiên LAN/IP hoặc AirPrint. Internet chỉ dùng để đồng bộ cấu hình.'))]))),
+    ...rows.map((p)=>Card(child:ListTile(leading:Icon('${p['ketnoi']}'=='lan'?Icons.lan:'${p['ketnoi']}'=='bluetooth'?Icons.bluetooth:Icons.print),title:Text('${p['ten']}${p['mac_dinh']==true||'${p['mac_dinh']}'=='1'?' • Mặc định':''}'),subtitle:Text(desc(p)),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(tooltip:'In thử',onPressed:()=>test(p),icon:const Icon(Icons.print_outlined)),if(canManage)IconButton(tooltip:'Sửa',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)),if(canManage)IconButton(tooltip:'Xóa',onPressed:()=>remove(p),icon:const Icon(Icons.delete_outline))])))),
+    if(rows.isEmpty)const Padding(padding:EdgeInsets.all(30),child:Center(child:Text('Chưa có máy in lưu trên điện thoại. Nhấn “Thêm máy” để cấu hình ngay cả khi ngoại tuyến.',textAlign:TextAlign.center)))
   ]));
 }
 
