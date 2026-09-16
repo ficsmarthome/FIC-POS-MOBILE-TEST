@@ -1413,7 +1413,14 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
       final table = Map<String, dynamic>.from(raw);
       final id = int.tryParse('${table['id'] ?? 0}') ?? 0;
       if (id <= 0) continue;
-      final busy = '${table['trangthai'] ?? 1}' == '2';
+      final rawOpenOrders = table['open_orders'];
+      final hasOpenOrders = rawOpenOrders is List && rawOpenOrders.isNotEmpty;
+      final total = num.tryParse('${table['tongtien'] ?? 0}') ?? 0;
+      final orderCount = int.tryParse('${table['so_don'] ?? 0}') ?? 0;
+      // Some bootstrap responses can expose the monetary/open-order summary
+      // before/without trangthai=2. Treat every positive order signal as busy;
+      // never replace its cached detail with an empty snapshot.
+      final busy = '${table['trangthai'] ?? 1}' == '2' || hasOpenOrders || total > 0 || orderCount > 0;
       if (!busy) {
         // Bootstrap is authoritative for a free table. Replace a stale cached
         // order so an online -> offline transition cannot reopen old items.
@@ -1671,6 +1678,11 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
 
       final fresh = await api.get('/bootstrap');
       if (mounted) {
+        // Before publishing/caching a fresh table list, persist the complete
+        // order/items snapshot of every occupied table. Otherwise Home may know
+        // that a table is busy while OfflineStore still contains an old/empty
+        // order when Internet disappears immediately afterwards.
+        await _cacheRemoteTableSnapshots(Map<String, dynamic>.from(fresh));
         ficOfflineMode = false;
         setState(() { data = fresh; error = null; _offlineMode = false; });
         _captureBootstrapVersions(fresh);
