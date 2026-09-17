@@ -4977,7 +4977,7 @@ Widget ficModulePage(String module) {
     case 'ingredients': return const IngredientsPage();
     case 'recipes': return const RecipesPage();
     case 'tasks': return const TasksPage();
-    case 'schedule': return const SchedulePage();
+    case 'schedule': return const WorkSchedulePage();
     case 'late_request': return const LateRequestPage();
     case 'salary_advance': return const SalaryAdvancePage();
     case 'daily_report': return const DailyReportPage();
@@ -6328,7 +6328,34 @@ class SchedulePage extends StatefulWidget {
 class _SchedulePageState extends State<SchedulePage>{
   bool loading=true; Map data={}; final selected=<String,bool>{};
   @override void initState(){super.initState();load();}
-  Future<void> load() async {setState(()=>loading=true);final r=await api.get('/schedule');data=(r['data'] as Map?)??{};if(mounted)setState(()=>loading=false);}
+  Future<void> load() async {
+    setState(()=>loading=true);
+    final r=await api.get('/schedule');
+    data=(r['data'] as Map?)??{};
+    selected.clear();
+    final days=List.from(data['daysOfWeek'] as List? ?? []);
+    final dayIndexById=<String,int>{};
+    for(var i=0;i<days.length;i++){final d=days[i];if(d is Map)dayIndexById['${d['id']}']=i;}
+    final schedule=data['schedule'];
+    if(schedule is Map){
+      schedule.forEach((shiftKey,rows){
+        for(final raw in List.from(rows as List? ?? const [])){
+          if(raw is! Map)continue;
+          final sid='${raw['id_calamviec']??shiftKey}';
+          final dayIndex=dayIndexById['${raw['id_thu']}'];
+          if(dayIndex!=null && dayIndex>=0 && dayIndex<7)selected['$sid-$dayIndex']=true;
+        }
+      });
+    }else if(schedule is List){
+      for(final raw in schedule){
+        if(raw is! Map)continue;
+        final sid='${raw['id_calamviec']??''}';
+        final dayIndex=dayIndexById['${raw['id_thu']}'];
+        if(sid.isNotEmpty && dayIndex!=null && dayIndex>=0 && dayIndex<7)selected['$sid-$dayIndex']=true;
+      }
+    }
+    if(mounted)setState(()=>loading=false);
+  }
   Future<void> save() async {
     final shifts=List.from(data['shifts'] as List? ?? []); final payload=<String,dynamic>{};
     for(final sh in shifts){final m=sh as Map;final sid='${m['id']}';payload[sid]=<String,int>{};for(var d=0;d<7;d++){payload[sid]['day$d']=(selected['$sid-$d']??false)?1:0;}}
@@ -6355,6 +6382,64 @@ class _SchedulePageState extends State<SchedulePage>{
           }),
         ],
       ),
+    );
+  }
+}
+
+
+class WorkSchedulePage extends StatefulWidget {
+  const WorkSchedulePage({super.key});
+  @override State<WorkSchedulePage> createState()=>_WorkSchedulePageState();
+}
+class _WorkSchedulePageState extends State<WorkSchedulePage>{
+  bool loading=true; Map data={}; String? error;
+  @override void initState(){super.initState();load();}
+  Future<void> load() async {
+    if(mounted)setState((){loading=true;error=null;});
+    try{
+      final r=await api.get('/work-schedule');
+      data=(r['data'] as Map?)??{};
+    }catch(e){error=e.toString().replaceFirst('Exception: ','');}
+    if(mounted)setState(()=>loading=false);
+  }
+  String _dateText(dynamic value){
+    final raw='${value??''}';
+    final d=DateTime.tryParse(raw);
+    if(d==null)return raw;
+    String two(int x)=>x.toString().padLeft(2,'0');
+    return '${two(d.day)}/${two(d.month)}/${d.year}';
+  }
+  @override Widget build(BuildContext context){
+    final days=List.from(data['daysOfWeek'] as List? ?? []);
+    final shifts=List.from(data['shifts'] as List? ?? []);
+    final rows=List.from(data['schedule'] as List? ?? []);
+    final shiftById=<String,Map>{for(final x in shifts)if(x is Map)'${x['id']}':x};
+    return Scaffold(
+      appBar:AppBar(title:const Text('Lịch làm việc')),
+      body:loading?const Center(child:CircularProgressIndicator()):error!=null
+        ?Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(error!,textAlign:TextAlign.center),const SizedBox(height:12),FilledButton.icon(onPressed:load,icon:const Icon(Icons.refresh),label:const Text('Thử lại'))])))
+        :RefreshIndicator(onRefresh:load,child:ListView(
+          physics:const AlwaysScrollableScrollPhysics(),padding:const EdgeInsets.all(14),children:[
+            if(rows.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:48),child:Center(child:Text('Tuần này bạn chưa có lịch làm việc chính thức.'))),
+            ...days.map((rawDay){
+              if(rawDay is! Map)return const SizedBox.shrink();
+              final day=rawDay; final dayId='${day['id']}';
+              final dayRows=rows.where((x)=>x is Map && '${x['id_thu']}'==dayId).cast<Map>().toList();
+              if(dayRows.isEmpty)return const SizedBox.shrink();
+              return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Text('${day['thu']??''}${'${day['date']??''}'.isNotEmpty?' • ${_dateText(day['date'])}':''}',style:const TextStyle(fontWeight:FontWeight.w800,fontSize:16)),
+                const SizedBox(height:8),
+                ...dayRows.map((row){
+                  final sh=shiftById['${row['id_calamviec']}']??(row['calamviec'] is Map?row['calamviec'] as Map:<String,dynamic>{});
+                  final name='${sh['tencalamviec']??sh['tenca']??'Ca làm việc'}';
+                  final time='${sh['thoigianlam']??''}'.trim();
+                  final position='${row['vitrilamviec']??''}'.trim();
+                  return ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.schedule_outlined),title:Text(name),subtitle:Text([if(time.isNotEmpty)time,if(position.isNotEmpty)position].join(' • ')));
+                }),
+              ])));
+            }),
+          ],
+        )),
     );
   }
 }
