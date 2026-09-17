@@ -2060,6 +2060,7 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
       return true;
     }).toList();
     final trial = _trialEntitlement;
+    final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
 
     return Scaffold(
       drawer: AppMenu(
@@ -2230,11 +2231,11 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
                         child: GridView.builder(
                           padding: const EdgeInsets.all(14),
                           gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            childAspectRatio: 1.18,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: isLandscape ? 4 : 2,
+                            childAspectRatio: isLandscape ? 1.85 : 1.18,
+                            crossAxisSpacing: isLandscape ? 8 : 12,
+                            mainAxisSpacing: isLandscape ? 8 : 12,
                           ),
                           itemCount: shown.length,
                           itemBuilder: (_, i) {
@@ -2633,7 +2634,9 @@ class TableCard extends StatelessWidget {
       required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Material(
+  Widget build(BuildContext context) {
+    final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+    return Material(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
@@ -2649,7 +2652,9 @@ class TableCard extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(16),
             ),
-            padding: const EdgeInsets.fromLTRB(14, 13, 14, 12),
+            padding: isLandscape
+                ? const EdgeInsets.fromLTRB(9, 5, 9, 5)
+                : const EdgeInsets.fromLTRB(14, 13, 14, 12),
             child: LayoutBuilder(
               builder: (context, constraints) => Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2660,20 +2665,20 @@ class TableCard extends StatelessWidget {
                         ? Icons.groups_2_outlined
                         : Icons.table_restaurant_outlined,
                     color: Theme.of(context).colorScheme.primary,
-                    size: 27,
+                    size: isLandscape ? 21 : 27,
                   ),
-                  const Spacer(),
+                  if (!isLandscape) const Spacer(),
                   Text('${table['tenban'] ?? table['ten'] ?? 'Bàn'}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700)),
+                      style: TextStyle(
+                          fontSize: isLandscape ? 16 : 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 2),
                   Text(isBusy ? 'Đang sử dụng' : 'Còn trống',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 14,
+                          fontSize: isLandscape ? 12 : 14,
                           color: isBusy
                               ? Theme.of(context).colorScheme.primary
                               : Colors.black54)),
@@ -2682,7 +2687,7 @@ class TableCard extends StatelessWidget {
                     Row(mainAxisSize: MainAxisSize.min, children: [
                       Flexible(child: Text('${money(total)} đ',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900,
+                          style: TextStyle(fontSize: isLandscape ? 14 : 16, fontWeight: FontWeight.w900,
                               color: Theme.of(context).colorScheme.primary))),
                       if (hasPromotion) const Padding(
                         padding: EdgeInsets.only(left: 4),
@@ -2696,6 +2701,7 @@ class TableCard extends StatelessWidget {
           ),
         ),
       );
+  }
 }
 
 class OrderPage extends StatefulWidget {
@@ -4303,6 +4309,7 @@ class _OrderState extends State<OrderPage> {
     final categories = (widget.bootstrap['categories'] as List?) ?? [];
     final promos = (effectivePreview?['promotions'] as List?) ?? [];
     final gifts = (effectivePreview?['gifts'] as List?) ?? [];
+    final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
 
     return Scaffold(
       appBar: AppBar(
@@ -4328,100 +4335,219 @@ class _OrderState extends State<OrderPage> {
                     color: Colors.orange.shade100,
                     child: const Row(children: [Icon(Icons.cloud_off_outlined, size: 18), SizedBox(width: 8), Expanded(child: Text('Đang ngoại tuyến • Mọi thay đổi được lưu trên máy và sẽ tự đồng bộ', style: TextStyle(fontWeight: FontWeight.w700)))]),
                   ),
-                Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-                  child: Column(children: [
-                    SizedBox(
-                      height: 44,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          ...activeOrders.asMap().entries.map((entry) {
-                            final o = entry.value as Map;
-                            final code = '${o['madonhang'] ?? ''}';
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 7),
-                              child: ChoiceChip(
-                                label: Text('Đơn ${entry.key + 1}'),
-                                selected: code == orderCode,
-                                onSelected: (_) => selectOrder(code),
+                if (!isLandscape) ...[
+                  Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                    child: Column(children: [
+                      SizedBox(
+                        height: 44,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            ...activeOrders.asMap().entries.map((entry) {
+                              final o = entry.value as Map;
+                              final code = '${o['madonhang'] ?? ''}';
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 7),
+                                child: ChoiceChip(
+                                  label: Text('Đơn ${entry.key + 1}'),
+                                  selected: code == orderCode,
+                                  onSelected: (_) => selectOrder(code),
+                                ),
+                              );
+                            }),
+                            ActionChip(
+                              avatar: const Icon(Icons.add, size: 18),
+                              label: const Text('Đơn mới'),
+                              onPressed: createNewOrder,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(children: [
+                        Expanded(child: OutlinedButton.icon(onPressed: orderCode == null ? null : choosePriceList, icon: const Icon(Icons.sell_outlined), label: const Text('Bảng giá'))),
+                        const SizedBox(width: 8),
+                        Expanded(child: OutlinedButton.icon(onPressed: orderCode == null ? null : chooseCustomer, icon: const Icon(Icons.person_search_outlined), label: const Text('Khách hàng'))),
+                      ]),
+                      const SizedBox(height: 6),
+                      Row(children: [
+                        Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : changeTable, child: const Text('Đổi bàn'))),
+                        const SizedBox(width: 6),
+                        Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : openTableActions, child: const Text('Tách / Gộp bàn'))),
+                        const SizedBox(width: 6),
+                        Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : openOrderActions, child: const Text('Chuyển / Gộp đơn'))),
+                      ]),
+                    ]),
+                  ),
+                  Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: TextField(
+                      onChanged: (v) => setState(() => query = v),
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Tìm món / mã món',
+                        filled: true,
+                        border: OutlineInputBorder(borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    height: 50,
+                    color: Colors.white,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Tất cả'),
+                          selected: category == 'all',
+                          onSelected: (_) => setState(() => category = 'all'),
+                        ),
+                        ...categories.map((e) {
+                          final x = e as Map;
+                          final id = '${x['id']}';
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 7),
+                            child: ChoiceChip(
+                              label: Text('${x['tendanhmuc'] ?? x['ten'] ?? 'Danh mục'}'),
+                              selected: category == id,
+                              onSelected: (_) => setState(() => category = id),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  // Landscape: gom toàn bộ thao tác vào một hàng cuộn ngang
+                  // để luôn chừa chiều cao cho danh sách món.
+                  Container(
+                    height: 42,
+                    color: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        ...activeOrders.asMap().entries.map((entry) {
+                          final o = entry.value as Map;
+                          final code = '${o['madonhang'] ?? ''}';
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 5),
+                            child: ChoiceChip(
+                              visualDensity: VisualDensity.compact,
+                              label: Text('Đơn ${entry.key + 1}'),
+                              selected: code == orderCode,
+                              onSelected: (_) => selectOrder(code),
+                            ),
+                          );
+                        }),
+                        ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          avatar: const Icon(Icons.add, size: 16),
+                          label: const Text('Đơn mới'),
+                          onPressed: createNewOrder,
+                        ),
+                        const SizedBox(width: 6),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: orderCode == null ? null : choosePriceList,
+                          icon: const Icon(Icons.sell_outlined, size: 16),
+                          label: const Text('Bảng giá'),
+                        ),
+                        const SizedBox(width: 5),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: orderCode == null ? null : chooseCustomer,
+                          icon: const Icon(Icons.person_search_outlined, size: 16),
+                          label: const Text('Khách hàng'),
+                        ),
+                        const SizedBox(width: 5),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: orderCode == null ? null : changeTable,
+                          child: const Text('Đổi bàn'),
+                        ),
+                        const SizedBox(width: 5),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: orderCode == null ? null : openTableActions,
+                          child: const Text('Tách / Gộp bàn'),
+                        ),
+                        const SizedBox(width: 5),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: orderCode == null ? null : openOrderActions,
+                          child: const Text('Chuyển / Gộp đơn'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 44,
+                    color: Colors.white,
+                    padding: const EdgeInsets.fromLTRB(8, 3, 8, 3),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            onChanged: (v) => setState(() => query = v),
+                            style: const TextStyle(fontSize: 13),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              prefixIcon: Icon(Icons.search, size: 19),
+                              prefixIconConstraints: BoxConstraints(minWidth: 38),
+                              hintText: 'Tìm món / mã món',
+                              filled: true,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                              border: OutlineInputBorder(borderSide: BorderSide.none),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          flex: 5,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              ChoiceChip(
+                                visualDensity: VisualDensity.compact,
+                                label: const Text('Tất cả'),
+                                selected: category == 'all',
+                                onSelected: (_) => setState(() => category = 'all'),
                               ),
-                            );
-                          }),
-                          ActionChip(
-                            avatar: const Icon(Icons.add, size: 18),
-                            label: const Text('Đơn mới'),
-                            onPressed: createNewOrder,
+                              ...categories.map((e) {
+                                final x = e as Map;
+                                final id = '${x['id']}';
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 5),
+                                  child: ChoiceChip(
+                                    visualDensity: VisualDensity.compact,
+                                    label: Text('${x['tendanhmuc'] ?? x['ten'] ?? 'Danh mục'}'),
+                                    selected: category == id,
+                                    onSelected: (_) => setState(() => category = id),
+                                  ),
+                                );
+                              }),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      Expanded(child: OutlinedButton.icon(onPressed: orderCode == null ? null : choosePriceList, icon: const Icon(Icons.sell_outlined), label: const Text('Bảng giá'))),
-                      const SizedBox(width: 8),
-                      Expanded(child: OutlinedButton.icon(onPressed: orderCode == null ? null : chooseCustomer, icon: const Icon(Icons.person_search_outlined), label: const Text('Khách hàng'))),
-                    ]),
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : changeTable, child: const Text('Đổi bàn'))),
-                      const SizedBox(width: 6),
-                      Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : openTableActions, child: const Text('Tách / Gộp bàn'))),
-                      const SizedBox(width: 6),
-                      Expanded(child: OutlinedButton(onPressed: orderCode == null ? null : openOrderActions, child: const Text('Chuyển / Gộp đơn'))),
-                    ]),
-                  ]),
-                ),
-                Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                  child: TextField(
-                    onChanged: (v) => setState(() => query = v),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: 'Tìm món / mã món',
-                      filled: true,
-                      border: OutlineInputBorder(borderSide: BorderSide.none),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                Container(
-                  height: 50,
-                  color: Colors.white,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    children: [
-                      ChoiceChip(
-                        label: const Text('Tất cả'),
-                        selected: category == 'all',
-                        onSelected: (_) => setState(() => category = 'all'),
-                      ),
-                      ...categories.map((e) {
-                        final x = e as Map;
-                        final id = '${x['id']}';
-                        return Padding(
-                          padding: const EdgeInsets.only(left: 7),
-                          child: ChoiceChip(
-                            label: Text('${x['tendanhmuc'] ?? x['ten'] ?? 'Danh mục'}'),
-                            selected: category == id,
-                            onSelected: (_) => setState(() => category = id),
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-                if (promos.isNotEmpty || gifts.isNotEmpty)
+                ],
+                if (!isLandscape && (promos.isNotEmpty || gifts.isNotEmpty))
                   PromotionBanner(promotions: promos, gifts: gifts),
                 Expanded(
                   child: GridView.builder(
                     padding: const EdgeInsets.all(10),
                     gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio: 1.25,
+                        SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: isLandscape ? 4 : 2,
+                      childAspectRatio: isLandscape ? 1.9 : 1.25,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
                     ),
@@ -6325,17 +6451,25 @@ class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key});
   @override State<SchedulePage> createState()=>_SchedulePageState();
 }
+
 class _SchedulePageState extends State<SchedulePage>{
   bool loading=true; Map data={}; final selected=<String,bool>{};
+
   @override void initState(){super.initState();load();}
+
   Future<void> load() async {
     setState(()=>loading=true);
     final r=await api.get('/schedule');
     data=(r['data'] as Map?)??{};
     selected.clear();
+
     final days=List.from(data['daysOfWeek'] as List? ?? []);
     final dayIndexById=<String,int>{};
-    for(var i=0;i<days.length;i++){final d=days[i];if(d is Map)dayIndexById['${d['id']}']=i;}
+    for(var i=0;i<days.length;i++){
+      final d=days[i];
+      if(d is Map)dayIndexById['${d['id']}']=i;
+    }
+
     final schedule=data['schedule'];
     if(schedule is Map){
       schedule.forEach((shiftKey,rows){
@@ -6343,7 +6477,9 @@ class _SchedulePageState extends State<SchedulePage>{
           if(raw is! Map)continue;
           final sid='${raw['id_calamviec']??shiftKey}';
           final dayIndex=dayIndexById['${raw['id_thu']}'];
-          if(dayIndex!=null && dayIndex>=0 && dayIndex<7)selected['$sid-$dayIndex']=true;
+          if(dayIndex!=null && dayIndex>=0 && dayIndex<7){
+            selected['$sid-$dayIndex']=true;
+          }
         }
       });
     }else if(schedule is List){
@@ -6351,37 +6487,262 @@ class _SchedulePageState extends State<SchedulePage>{
         if(raw is! Map)continue;
         final sid='${raw['id_calamviec']??''}';
         final dayIndex=dayIndexById['${raw['id_thu']}'];
-        if(sid.isNotEmpty && dayIndex!=null && dayIndex>=0 && dayIndex<7)selected['$sid-$dayIndex']=true;
+        if(sid.isNotEmpty && dayIndex!=null && dayIndex>=0 && dayIndex<7){
+          selected['$sid-$dayIndex']=true;
+        }
       }
     }
+
     if(mounted)setState(()=>loading=false);
   }
+
   Future<void> save() async {
-    final shifts=List.from(data['shifts'] as List? ?? []); final payload=<String,dynamic>{};
-    for(final sh in shifts){final m=sh as Map;final sid='${m['id']}';payload[sid]=<String,int>{};for(var d=0;d<7;d++){payload[sid]['day$d']=(selected['$sid-$d']??false)?1:0;}}
+    final shifts=List.from(data['shifts'] as List? ?? []);
+    final payload=<String,dynamic>{};
+    for(final sh in shifts){
+      final m=sh as Map;
+      final sid='${m['id']}';
+      payload[sid]=<String,int>{};
+      for(var d=0;d<7;d++){
+        payload[sid]['day$d']=(selected['$sid-$d']??false)?1:0;
+      }
+    }
     await api.post('/schedule/register',{'shift':payload});
-    if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu đăng ký lịch')));
+    if(mounted){
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content:Text('Đã lưu đăng ký lịch')),
+      );
+    }
     await load();
   }
+
+  String _dateText(dynamic value){
+    final raw='${value??''}';
+    final d=DateTime.tryParse(raw);
+    if(d==null)return raw;
+    String two(int x)=>x.toString().padLeft(2,'0');
+    return '${two(d.day)}/${two(d.month)}';
+  }
+
+  String _dayName(Map day,int index){
+    final raw='${day['thu']??day['name']??''}'.trim();
+    if(raw.isNotEmpty)return raw;
+    const fallback=['Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7','Chủ nhật'];
+    return index>=0 && index<fallback.length?fallback[index]:'Ngày';
+  }
+
+  String _shiftName(Map sh){
+    return '${sh['tencalamviec']??sh['tenca']??'Ca làm việc'}'.trim();
+  }
+
+  String _shiftTime(Map sh){
+    return '${sh['thoigianlam']??''}'.trim();
+  }
+
+  Widget _registrationTable(List days,List shifts,bool locked){
+    const dayWidth=112.0;
+    const shiftWidth=145.0;
+
+    return Scrollbar(
+      thumbVisibility:true,
+      child:SingleChildScrollView(
+        scrollDirection:Axis.horizontal,
+        child:Table(
+          defaultVerticalAlignment:TableCellVerticalAlignment.middle,
+          border:TableBorder.all(color:const Color(0xffd9dee7),width:1),
+          columnWidths:<int,TableColumnWidth>{
+            0:const FixedColumnWidth(shiftWidth),
+            for(var i=0;i<days.length;i++) i+1:const FixedColumnWidth(dayWidth),
+          },
+          children:[
+            TableRow(
+              decoration:const BoxDecoration(color:Color(0xffeaf3fb)),
+              children:[
+                const Padding(
+                  padding:EdgeInsets.symmetric(horizontal:8,vertical:14),
+                  child:Text('CA LÀM',textAlign:TextAlign.center,
+                    style:TextStyle(fontWeight:FontWeight.w800)),
+                ),
+                ...List.generate(days.length,(index){
+                  final raw=days[index];
+                  final day=raw is Map?raw:<String,dynamic>{};
+                  final date='${day['date']??''}'.trim();
+                  return Padding(
+                    padding:const EdgeInsets.symmetric(horizontal:6,vertical:10),
+                    child:Column(mainAxisSize:MainAxisSize.min,children:[
+                      Text(_dayName(day,index),textAlign:TextAlign.center,
+                        style:const TextStyle(fontWeight:FontWeight.w800)),
+                      if(date.isNotEmpty)...[
+                        const SizedBox(height:3),
+                        Text(_dateText(date),textAlign:TextAlign.center,
+                          style:const TextStyle(fontSize:12,color:Colors.black54)),
+                      ],
+                    ]),
+                  );
+                }),
+              ],
+            ),
+            ...shifts.map((rawShift){
+              final sh=rawShift is Map?rawShift:<String,dynamic>{};
+              final sid='${sh['id']}';
+              final time=_shiftTime(sh);
+
+              return TableRow(
+                children:[
+                  Container(
+                    constraints:const BoxConstraints(minHeight:76),
+                    padding:const EdgeInsets.all(10),
+                    alignment:Alignment.centerLeft,
+                    child:Column(
+                      mainAxisSize:MainAxisSize.min,
+                      crossAxisAlignment:CrossAxisAlignment.start,
+                      children:[
+                        Text(_shiftName(sh),
+                          style:const TextStyle(fontWeight:FontWeight.w800)),
+                        if(time.isNotEmpty)...[
+                          const SizedBox(height:4),
+                          Text(time,style:const TextStyle(fontSize:12,color:Colors.black54)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  ...List.generate(days.length,(dayIndex){
+                    final key='$sid-$dayIndex';
+                    final checked=selected[key]??false;
+
+                    return InkWell(
+                      onTap:locked?null:()=>setState(()=>selected[key]=!checked),
+                      child:Container(
+                        constraints:const BoxConstraints(minHeight:76),
+                        padding:const EdgeInsets.symmetric(horizontal:6,vertical:8),
+                        color:checked?const Color(0xffeef8f0):Colors.white,
+                        child:Column(
+                          mainAxisAlignment:MainAxisAlignment.center,
+                          mainAxisSize:MainAxisSize.min,
+                          children:[
+                            Icon(
+                              checked?Icons.check_circle:Icons.radio_button_unchecked,
+                              color:checked
+                                ?const Color(0xff2e7d32)
+                                :(locked?Colors.black26:const Color(0xff7a8492)),
+                              size:24,
+                            ),
+                            const SizedBox(height:3),
+                            Text(
+                              checked?'Đã chọn':'Chọn',
+                              textAlign:TextAlign.center,
+                              style:TextStyle(
+                                fontSize:12,
+                                fontWeight:checked?FontWeight.w800:FontWeight.w500,
+                                color:checked
+                                  ?const Color(0xff256b2a)
+                                  :(locked?Colors.black38:Colors.black54),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override Widget build(BuildContext context){
-    final shifts=List.from(data['shifts'] as List? ?? []); final locked=data['locked']==true;
+    final shifts=List.from(data['shifts'] as List? ?? []);
+    final days=List.from(data['daysOfWeek'] as List? ?? []);
+    final locked=data['locked']==true;
+
     return Scaffold(
       appBar:AppBar(title:const Text('Đăng ký lịch làm việc')),
-      bottomNavigationBar:SafeArea(child:Padding(padding:const EdgeInsets.all(10),child:FilledButton(onPressed:locked?null:save,child:Text(locked?'Lịch đã chốt':'Lưu đăng ký')))),
-      body:loading?const Center(child:CircularProgressIndicator()):ListView(
-        padding:const EdgeInsets.all(14),
-        children:[
-          Text('Chế độ: ${data['mode']??''}'),
-          const SizedBox(height:8),
-          ...shifts.map((e){
-            final m=e as Map; final sid='${m['id']}';
-            return Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-              Text('${m['tencalamviec']??m['tenca']??'Ca'} ${m['thoigianlam']??''}',style:const TextStyle(fontWeight:FontWeight.bold)),
-              Wrap(children:List.generate(7,(d)=>FilterChip(label:Text(['T2','T3','T4','T5','T6','T7','CN'][d]),selected:selected['$sid-$d']??false,onSelected:locked?null:(v)=>setState(()=>selected['$sid-$d']=v)))),
-            ])));
-          }),
-        ],
+      bottomNavigationBar:loading?null:SafeArea(
+        child:Padding(
+          padding:const EdgeInsets.fromLTRB(12,8,12,12),
+          child:FilledButton.icon(
+            onPressed:locked?null:save,
+            icon:Icon(locked?Icons.lock_outline:Icons.save_outlined),
+            label:Text(locked?'Lịch đã chốt':'Lưu đăng ký'),
+          ),
+        ),
       ),
+      body:loading
+        ?const Center(child:CircularProgressIndicator())
+        :RefreshIndicator(
+          onRefresh:load,
+          child:ListView(
+            physics:const AlwaysScrollableScrollPhysics(),
+            padding:const EdgeInsets.fromLTRB(12,12,12,24),
+            children:[
+              Row(children:[
+                const Icon(Icons.edit_calendar_outlined,size:20),
+                const SizedBox(width:7),
+                const Expanded(child:Text(
+                  'Đăng ký lịch làm việc tuần tới',
+                  style:TextStyle(fontWeight:FontWeight.w800,fontSize:16),
+                )),
+                IconButton(onPressed:load,tooltip:'Làm mới',icon:const Icon(Icons.refresh)),
+              ]),
+              const SizedBox(height:4),
+              Text(
+                locked
+                  ?'Lịch đã chốt không thể thay đổi.'
+                  :'Chạm vào từng ô để chọn hoặc bỏ chọn ca làm. Vuốt ngang để xem đầy đủ các ngày.',
+                style:TextStyle(
+                  fontSize:13,
+                  fontWeight:locked?FontWeight.w700:FontWeight.w400,
+                  color:locked?const Color(0xffb3261e):Colors.black54,
+                ),
+              ),
+              if(locked)...[
+                const SizedBox(height:10),
+                Container(
+                  padding:const EdgeInsets.all(12),
+                  decoration:BoxDecoration(
+                    color:const Color(0xfffff1f0),
+                    borderRadius:BorderRadius.circular(10),
+                    border:Border.all(color:const Color(0xffffc9c5)),
+                  ),
+                  child:const Row(
+                    crossAxisAlignment:CrossAxisAlignment.start,
+                    children:[
+                      Icon(Icons.lock_outline,color:Color(0xffb3261e),size:20),
+                      SizedBox(width:8),
+                      Expanded(child:Text(
+                        'Lịch đã chốt không thể thay đổi.',
+                        style:TextStyle(
+                          color:Color(0xff8c1d18),
+                          fontWeight:FontWeight.w800,
+                        ),
+                      )),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height:12),
+              if(days.isEmpty || shifts.isEmpty)
+                const Padding(
+                  padding:EdgeInsets.symmetric(vertical:48),
+                  child:Center(child:Text(
+                    'Chưa có dữ liệu ca làm việc để đăng ký.',
+                    textAlign:TextAlign.center,
+                  )),
+                )
+              else
+                Card(
+                  clipBehavior:Clip.antiAlias,
+                  child:Padding(
+                    padding:const EdgeInsets.all(1),
+                    child:_registrationTable(days,shifts,locked),
+                  ),
+                ),
+            ],
+          ),
+        ),
     );
   }
 }
@@ -6391,58 +6752,233 @@ class WorkSchedulePage extends StatefulWidget {
   const WorkSchedulePage({super.key});
   @override State<WorkSchedulePage> createState()=>_WorkSchedulePageState();
 }
+
 class _WorkSchedulePageState extends State<WorkSchedulePage>{
   bool loading=true; Map data={}; String? error;
+
   @override void initState(){super.initState();load();}
+
   Future<void> load() async {
     if(mounted)setState((){loading=true;error=null;});
     try{
       final r=await api.get('/work-schedule');
       data=(r['data'] as Map?)??{};
-    }catch(e){error=e.toString().replaceFirst('Exception: ','');}
+    }catch(e){
+      error=e.toString().replaceFirst('Exception: ','');
+    }
     if(mounted)setState(()=>loading=false);
   }
+
   String _dateText(dynamic value){
     final raw='${value??''}';
     final d=DateTime.tryParse(raw);
     if(d==null)return raw;
     String two(int x)=>x.toString().padLeft(2,'0');
-    return '${two(d.day)}/${two(d.month)}/${d.year}';
+    return '${two(d.day)}/${two(d.month)}';
   }
+
+  String _dayName(Map day){
+    final raw='${day['thu']??day['name']??''}'.trim();
+    if(raw.isNotEmpty)return raw;
+    return 'Ngày';
+  }
+
+  String _shiftName(Map sh){
+    return '${sh['tencalamviec']??sh['tenca']??'Ca làm việc'}'.trim();
+  }
+
+  String _shiftTime(Map sh){
+    return '${sh['thoigianlam']??''}'.trim();
+  }
+
+  Map? _scheduleCell(List rows,String dayId,String shiftId){
+    for(final raw in rows){
+      if(raw is Map &&
+          '${raw['id_thu']}'==dayId &&
+          '${raw['id_calamviec']}'==shiftId){
+        return raw;
+      }
+    }
+    return null;
+  }
+
+  Widget _table(List days,List shifts,List rows){
+    const dayWidth=112.0;
+    const shiftWidth=145.0;
+
+    return Scrollbar(
+      thumbVisibility:true,
+      child:SingleChildScrollView(
+        scrollDirection:Axis.horizontal,
+        child:Table(
+          defaultVerticalAlignment:TableCellVerticalAlignment.middle,
+          border:TableBorder.all(color:const Color(0xffd9dee7),width:1),
+          columnWidths:<int,TableColumnWidth>{
+            0:const FixedColumnWidth(shiftWidth),
+            for(var i=0;i<days.length;i++) i+1:const FixedColumnWidth(dayWidth),
+          },
+          children:[
+            TableRow(
+              decoration:const BoxDecoration(color:Color(0xffeaf3fb)),
+              children:[
+                const Padding(
+                  padding:EdgeInsets.symmetric(horizontal:8,vertical:14),
+                  child:Text('CA LÀM',textAlign:TextAlign.center,
+                    style:TextStyle(fontWeight:FontWeight.w800)),
+                ),
+                ...days.map((raw){
+                  final day=raw is Map?raw:<String,dynamic>{};
+                  final date='${day['date']??''}'.trim();
+                  return Padding(
+                    padding:const EdgeInsets.symmetric(horizontal:6,vertical:10),
+                    child:Column(mainAxisSize:MainAxisSize.min,children:[
+                      Text(_dayName(day),textAlign:TextAlign.center,
+                        style:const TextStyle(fontWeight:FontWeight.w800)),
+                      if(date.isNotEmpty)...[
+                        const SizedBox(height:3),
+                        Text(_dateText(date),textAlign:TextAlign.center,
+                          style:const TextStyle(fontSize:12,color:Colors.black54)),
+                      ],
+                    ]),
+                  );
+                }),
+              ],
+            ),
+            ...shifts.map((rawShift){
+              final sh=rawShift is Map?rawShift:<String,dynamic>{};
+              final shiftId='${sh['id']}';
+              final time=_shiftTime(sh);
+              return TableRow(
+                children:[
+                  Container(
+                    constraints:const BoxConstraints(minHeight:76),
+                    padding:const EdgeInsets.all(10),
+                    alignment:Alignment.centerLeft,
+                    child:Column(
+                      mainAxisSize:MainAxisSize.min,
+                      crossAxisAlignment:CrossAxisAlignment.start,
+                      children:[
+                        Text(_shiftName(sh),
+                          style:const TextStyle(fontWeight:FontWeight.w800)),
+                        if(time.isNotEmpty)...[
+                          const SizedBox(height:4),
+                          Text(time,style:const TextStyle(fontSize:12,color:Colors.black54)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  ...days.map((rawDay){
+                    final day=rawDay is Map?rawDay:<String,dynamic>{};
+                    final row=_scheduleCell(rows,'${day['id']}',shiftId);
+                    if(row==null){
+                      return const SizedBox(
+                        height:76,
+                        child:Center(child:Text('—',
+                          style:TextStyle(color:Colors.black26,fontSize:18))),
+                      );
+                    }
+                    final position='${row['vitrilamviec']??''}'.trim();
+                    return Container(
+                      constraints:const BoxConstraints(minHeight:76),
+                      padding:const EdgeInsets.symmetric(horizontal:6,vertical:8),
+                      color:const Color(0xffeef8f0),
+                      child:Column(
+                        mainAxisAlignment:MainAxisAlignment.center,
+                        mainAxisSize:MainAxisSize.min,
+                        children:[
+                          const Icon(Icons.check_circle,color:Color(0xff2e7d32),size:22),
+                          const SizedBox(height:3),
+                          const Text('Làm',textAlign:TextAlign.center,
+                            style:TextStyle(fontWeight:FontWeight.w800,color:Color(0xff256b2a))),
+                          if(position.isNotEmpty)...[
+                            const SizedBox(height:3),
+                            Text(position,textAlign:TextAlign.center,
+                              maxLines:2,overflow:TextOverflow.ellipsis,
+                              style:const TextStyle(fontSize:11)),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override Widget build(BuildContext context){
     final days=List.from(data['daysOfWeek'] as List? ?? []);
     final shifts=List.from(data['shifts'] as List? ?? []);
     final rows=List.from(data['schedule'] as List? ?? []);
-    final shiftById=<String,Map>{for(final x in shifts)if(x is Map)'${x['id']}':x};
+
     return Scaffold(
       appBar:AppBar(title:const Text('Lịch làm việc')),
-      body:loading?const Center(child:CircularProgressIndicator()):error!=null
-        ?Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(error!,textAlign:TextAlign.center),const SizedBox(height:12),FilledButton.icon(onPressed:load,icon:const Icon(Icons.refresh),label:const Text('Thử lại'))])))
-        :RefreshIndicator(onRefresh:load,child:ListView(
-          physics:const AlwaysScrollableScrollPhysics(),padding:const EdgeInsets.all(14),children:[
-            if(rows.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:48),child:Center(child:Text('Tuần này bạn chưa có lịch làm việc chính thức.'))),
-            ...days.map((rawDay){
-              if(rawDay is! Map)return const SizedBox.shrink();
-              final day=rawDay; final dayId='${day['id']}';
-              final dayRows=rows.where((x)=>x is Map && '${x['id_thu']}'==dayId).cast<Map>().toList();
-              if(dayRows.isEmpty)return const SizedBox.shrink();
-              return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                Text('${day['thu']??''}${'${day['date']??''}'.isNotEmpty?' • ${_dateText(day['date'])}':''}',style:const TextStyle(fontWeight:FontWeight.w800,fontSize:16)),
-                const SizedBox(height:8),
-                ...dayRows.map((row){
-                  final sh=shiftById['${row['id_calamviec']}']??(row['calamviec'] is Map?row['calamviec'] as Map:<String,dynamic>{});
-                  final name='${sh['tencalamviec']??sh['tenca']??'Ca làm việc'}';
-                  final time='${sh['thoigianlam']??''}'.trim();
-                  final position='${row['vitrilamviec']??''}'.trim();
-                  return ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.schedule_outlined),title:Text(name),subtitle:Text([if(time.isNotEmpty)time,if(position.isNotEmpty)position].join(' • ')));
-                }),
-              ])));
-            }),
-          ],
-        )),
+      body:loading
+        ?const Center(child:CircularProgressIndicator())
+        :error!=null
+          ?Center(child:Padding(
+            padding:const EdgeInsets.all(24),
+            child:Column(mainAxisSize:MainAxisSize.min,children:[
+              Text(error!,textAlign:TextAlign.center),
+              const SizedBox(height:12),
+              FilledButton.icon(onPressed:load,icon:const Icon(Icons.refresh),label:const Text('Thử lại')),
+            ]),
+          ))
+          :RefreshIndicator(
+            onRefresh:load,
+            child:ListView(
+              physics:const AlwaysScrollableScrollPhysics(),
+              padding:const EdgeInsets.fromLTRB(12,12,12,24),
+              children:[
+                Row(children:[
+                  const Icon(Icons.calendar_month_outlined,size:20),
+                  const SizedBox(width:7),
+                  const Expanded(child:Text(
+                    'Lịch chính thức tuần hiện tại',
+                    style:TextStyle(fontWeight:FontWeight.w800,fontSize:16),
+                  )),
+                  IconButton(onPressed:load,tooltip:'Làm mới',icon:const Icon(Icons.refresh)),
+                ]),
+                const SizedBox(height:4),
+                const Text(
+                  'Vuốt ngang để xem đầy đủ từ Thứ 2 đến Chủ nhật.',
+                  style:TextStyle(fontSize:12,color:Colors.black54),
+                ),
+                const SizedBox(height:12),
+                if(rows.isEmpty)
+                  const Padding(
+                    padding:EdgeInsets.symmetric(vertical:48),
+                    child:Center(child:Text(
+                      'Tuần này bạn chưa có lịch làm việc chính thức.',
+                      textAlign:TextAlign.center,
+                    )),
+                  )
+                else if(days.isEmpty || shifts.isEmpty)
+                  const Padding(
+                    padding:EdgeInsets.symmetric(vertical:48),
+                    child:Center(child:Text(
+                      'Dữ liệu lịch làm việc chưa đầy đủ.',
+                      textAlign:TextAlign.center,
+                    )),
+                  )
+                else
+                  Card(
+                    clipBehavior:Clip.antiAlias,
+                    child:Padding(
+                      padding:const EdgeInsets.all(1),
+                      child:_table(days,shifts,rows),
+                    ),
+                  ),
+              ],
+            ),
+          ),
     );
   }
 }
+
 
 class LateRequestPage extends StatefulWidget {
   const LateRequestPage({super.key});
