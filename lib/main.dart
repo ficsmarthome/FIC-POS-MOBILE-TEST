@@ -35,7 +35,7 @@ int maxInt(int a, int b) => a > b ? a : b;
 Map<String,dynamic> ficMapOrEmpty(dynamic value) => value is Map ? value.map((k,v)=>MapEntry('$k',v)) : <String,dynamic>{};
 
 // Version hiển thị tập trung tại một hằng số UI. Giữ đồng bộ với pubspec.yaml khi phát hành.
-const String ficPosMobileVersion = '1.13.33+92 TEST';
+const String ficPosMobileVersion = '1.13.50+108 TEST V10.5';
 
 // TEST ONLY: bypass TLS certificate errors only for *.test.ficpos.com.
 // Production ficpos.com remains subject to normal certificate validation.
@@ -195,6 +195,35 @@ bool ficOfflineMode = false;
 Future<int> ficOfflineBranchId() async {
   final prefs = await SharedPreferences.getInstance();
   return prefs.getInt('offline_branch_id') ?? 0;
+}
+
+String _ficReadCacheKey(String module) => 'fic_read_cache_v1::${api.baseUrl}::$module';
+String _ficReadCacheAtKey(String module) => '${_ficReadCacheKey(module)}::updated_at';
+Future<void> ficWriteReadCache(String module, Map value) async {
+  final p=await SharedPreferences.getInstance();
+  await p.setString(_ficReadCacheKey(module), jsonEncode(value));
+  await p.setString(_ficReadCacheAtKey(module), DateTime.now().toIso8601String());
+}
+Future<Map?> ficReadReadCache(String module) async {
+  try { final p=await SharedPreferences.getInstance(); final raw=p.getString(_ficReadCacheKey(module)); if(raw==null||raw.isEmpty)return null; final x=jsonDecode(raw); return x is Map?Map.from(x):null; } catch(_){ return null; }
+}
+Future<String?> ficReadCacheUpdatedAt(String module) async { final p=await SharedPreferences.getInstance(); return p.getString(_ficReadCacheAtKey(module)); }
+String ficOfflineUpdatedLabel(String? iso){
+  final d=DateTime.tryParse(iso??'')?.toLocal(); if(d==null)return '';
+  String two(int x)=>x.toString().padLeft(2,'0');
+  return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
+}
+Widget ficOfflineReadNotice(String? updatedAt){
+  final t=ficOfflineUpdatedLabel(updatedAt);
+  return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:Colors.amber.shade50,borderRadius:BorderRadius.circular(10)),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[const Icon(Icons.info_outline,size:18),const SizedBox(width:8),Expanded(child:Text('Lưu ý: Dữ liệu offline có thể không đúng khi dữ liệu thay đổi. Vui lòng kiểm tra lại khi có internet.${t.isNotEmpty?'\nCập nhật lần cuối: $t':''}'))]));
+}
+Future<void> ficPreloadPersonalReadCaches() async {
+  if(ficOfflineMode || api.token==null || api.baseUrl.isEmpty)return;
+  // Chạy nền sau login; lỗi preload không được làm chậm/chặn đăng nhập.
+  try { final r=await api.get('/payroll'); final d=(r['data'] is Map)?Map.from(r['data']):Map.from(r); await ficWriteReadCache('payroll',d); } catch(_) {}
+  try { final r=await api.get('/work-schedule'); final d=(r['data'] is Map)?Map.from(r['data']):Map.from(r); await ficWriteReadCache('work_schedule',d); } catch(_) {}
+  try { final r=await api.get('/tasks'); final d=(r['data'] is Map)?Map.from(r['data']):Map.from(r); await ficWriteReadCache('tasks_read',d); } catch(_) {}
+  try { final r=await api.get('/violations?page=1&per_page=100'); final d=(r['data'] is Map)?Map.from(r['data']):Map.from(r); await ficWriteReadCache('violations',d); } catch(_) {}
 }
 
 Future<dynamic> ficLoadCachedModule(String key, String endpoint) async {
@@ -448,9 +477,16 @@ Future<void> _openPendingPushFromNavigator() async {
   if(data==null || nav==null || api.token==null) return;
   if(!await _notificationBelongsToActiveBranch(data)) { _pendingPushData=null; return; }
   _pendingPushData=null;
-  final type='${data['type'] ?? ''}';
+  final type='${data['type'] ?? ''}'.toLowerCase();
   if(type=='payment_request') nav.push(MaterialPageRoute(builder:(_)=>const PaymentRequestsPage()));
-  else if(type=='ingredient_report') nav.push(MaterialPageRoute(builder:(_)=>const IngredientsPage()));
+  else if(type=='ingredient_report' || type.contains('ingredient')) nav.push(MaterialPageRoute(builder:(_)=>const IngredientsPage()));
+  else if(type.contains('salary_advance') || type.contains('advance')) nav.push(MaterialPageRoute(builder:(_)=>const SalaryAdvancePage()));
+  else if(type.contains('payroll') || type.contains('salary_opened') || type.contains('salary_final')) nav.push(MaterialPageRoute(builder:(_)=>const PayrollPage()));
+  else if(type.contains('schedule') || type.contains('shift_registration')) nav.push(MaterialPageRoute(builder:(_)=>const WorkSchedulePage()));
+  else if(type.contains('late') || type.contains('leave') || type.contains('early_leave')) nav.push(MaterialPageRoute(builder:(_)=>const LateRequestPage()));
+  else if(type.contains('attendance')) nav.push(MaterialPageRoute(builder:(_)=>const AttendancePage()));
+  else if(type.contains('task')) nav.push(MaterialPageRoute(builder:(_)=>const TasksPage()));
+  else if(type.contains('violation')) nav.push(MaterialPageRoute(builder:(_)=>const NativeModulePage(module:'violations')));
   else nav.push(MaterialPageRoute(builder:(_)=>const NotificationCenterPage()));
 }
 
@@ -475,6 +511,25 @@ double _parseStockQty(String raw, String unit) {
   final n=double.tryParse(normalized) ?? 0;
   return _isCountUnit(unit) ? n.roundToDouble() : double.parse(n.toStringAsFixed(2));
 }
+
+class _FicMoneyInputFormatter extends TextInputFormatter {
+  const _FicMoneyInputFormatter();
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return const TextEditingValue(text: '');
+    final normalized = digits.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+    final b = StringBuffer();
+    for (var i = 0; i < normalized.length; i++) {
+      if (i > 0 && (normalized.length - i) % 3 == 0) b.write('.');
+      b.write(normalized[i]);
+    }
+    final text = b.toString();
+    return TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
+}
+
+num _ficMoneyInputValue(String raw) => num.tryParse(raw.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
 
 class _StockQtyFormatter extends TextInputFormatter {
   final bool integerOnly;
@@ -707,6 +762,7 @@ class _LoginState extends State<LoginPage> {
         await _startBackgroundNotifications();
         await _registerPushToken();
         widget.onLogin();
+        Future.microtask(ficPreloadPersonalReadCaches);
       } catch (onlineError) {
         if (!_isNetworkError(onlineError)) rethrow;
         final cached = await OfflineStore.verifyOfflineLogin(
@@ -1406,6 +1462,7 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
       'cashbook': '/cashbook',
       'attendance': '/attendance',
       'tasks': '/tasks',
+      'violations': '/violations?page=1&per_page=100',
     };
     // Prefetch tuần tự để không tạo burst request/429. Lỗi một module không làm hỏng Home.
     for (final entry in modules.entries) {
@@ -1415,6 +1472,7 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
         dynamic payload = r['data'] ?? r;
         if (entry.key == 'recipes' && payload is Map) payload = await ficCacheRecipeImages(Map<String,dynamic>.from(payload));
         await OfflineStore.cacheModule(api.baseUrl, branchId, entry.key, payload);
+        if (entry.key == 'violations' && payload is Map) await ficWriteReadCache('violations', Map.from(payload));
       } catch (_) {}
     }
   }
@@ -1780,7 +1838,10 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> openPage(Widget page, {bool offlineCapable = false}) async {
-    if (ficOfflineMode && !offlineCapable) { _toast('Mục này cần Internet. Bán hàng offline vẫn hoạt động bình thường.'); return; }
+    if (ficOfflineMode && !offlineCapable) {
+      _showInternetRequired('Mục này cần Internet. Bán hàng offline vẫn hoạt động bình thường.');
+      return;
+    }
     Navigator.pop(context);
     await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
     await load();
@@ -1944,8 +2005,22 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> openWebModule(String module) async {
-    const offlineModules = {'returns','purchases','inventory','ingredients','recipes','cashbook','attendance','tasks'};
-    if (ficOfflineMode && !offlineModules.contains(module)) { _toast('Mục này cần Internet. Các nghiệp vụ bán hàng/kho cần thiết vẫn dùng offline bình thường.'); return; }
+    const offlineModules = {'returns','purchases','inventory','ingredients','recipes','cashbook','attendance','tasks','payroll','schedule','work_schedule','violations'};
+    if (ficOfflineMode && module == 'salary_advance') {
+      // openWebModule is invoked from the Drawer. Close that route first;
+      // checking Scaffold.isDrawerOpen from the State context is unreliable
+      // because this context belongs to the Scaffold itself, not the Drawer subtree.
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (mounted) _showInternetRequired('Để ứng lương bạn cần phải có internet');
+      return;
+    }
+    if (ficOfflineMode && !offlineModules.contains(module)) {
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (mounted) _showInternetRequired('Mục này cần Internet. Các nghiệp vụ bán hàng/kho cần thiết vẫn dùng offline bình thường.');
+      return;
+    }
     Navigator.pop(context);
     if (!mounted) return;
 
@@ -1955,6 +2030,39 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => ficModulePage(module)),
     );
+  }
+
+  void _showInternetRequired(String message) {
+    // The drawer overlays bottom SnackBars. Close it first, then show a
+    // top MaterialBanner on the main Scaffold so the user always sees it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentMaterialBanner();
+      messenger.showMaterialBanner(
+        MaterialBanner(
+          leading: const Icon(Icons.wifi_off_rounded),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Cần kết nối Internet', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 2),
+              Text(message),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => messenger.hideCurrentMaterialBanner(),
+              child: const Text('Đóng'),
+            ),
+          ],
+        ),
+      );
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) messenger.hideCurrentMaterialBanner();
+      });
+    });
   }
 
   void _toast(String text) => ScaffoldMessenger.of(context)
@@ -2092,6 +2200,7 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
         )),
         paymentRequestPendingCount: _paymentRequestPendingCount,
         onNotifications: () => openPage(const NotificationCenterPage()),
+        onNotificationSettings: () => openPage(const NotificationPreferencePage()),
         onSwitchBranch: switchBranch,
         onAvatar: changeAvatar,
         onLoyalty: () => openPage(const LoyaltyPage(), offlineCapable: true),
@@ -2230,13 +2339,17 @@ class _HomeState extends State<HomePage> with WidgetsBindingObserver {
                         onRefresh: load,
                         child: GridView.builder(
                           padding: const EdgeInsets.all(14),
-                          gridDelegate:
-                              SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: isLandscape ? 4 : 2,
-                            childAspectRatio: isLandscape ? 1.85 : 1.18,
-                            crossAxisSpacing: isLandscape ? 8 : 12,
-                            mainAxisSpacing: isLandscape ? 8 : 12,
-                          ),
+                          gridDelegate: (() {
+                            final size = MediaQuery.sizeOf(context);
+                            final tablet = size.shortestSide >= 600;
+                            final columns = tablet ? (isLandscape ? (size.width >= 1180 ? 5 : 4) : 3) : (isLandscape ? 4 : 2);
+                            return SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              childAspectRatio: tablet ? (isLandscape ? 1.65 : 1.55) : (isLandscape ? 1.85 : 1.18),
+                              crossAxisSpacing: tablet ? 10 : (isLandscape ? 8 : 12),
+                              mainAxisSpacing: tablet ? 10 : (isLandscape ? 8 : 12),
+                            );
+                          })(),
                           itemCount: shown.length,
                           itemBuilder: (_, i) {
                             final table = shown[i] as Map;
@@ -2343,6 +2456,7 @@ class AppMenu extends StatelessWidget {
   final VoidCallback onPaymentRequests;
   final int paymentRequestPendingCount;
   final VoidCallback onNotifications;
+  final VoidCallback onNotificationSettings;
   final VoidCallback onSwitchBranch;
   final VoidCallback onAvatar;
   final VoidCallback onLoyalty;
@@ -2361,6 +2475,7 @@ class AppMenu extends StatelessWidget {
     required this.onPaymentRequests,
     required this.paymentRequestPendingCount,
     required this.onNotifications,
+    required this.onNotificationSettings,
     required this.onSwitchBranch,
     required this.onAvatar,
     required this.onLoyalty,
@@ -2485,31 +2600,40 @@ class AppMenu extends StatelessWidget {
                       _child(context, Icons.menu_book_outlined, 'Sổ thu chi', () => onWebModule('cashbook')),
                       _child(context, Icons.bar_chart_outlined, 'Báo cáo cuối ngày', () => onWebModule('daily_report')),
                     ]),
-                    _parent(context, Icons.badge_outlined, 'Nhân sự', [
+                    _parent(context, Icons.badge_outlined, 'Cá nhân', [
+                      _section('CA LÀM VIỆC'),
                       _child(context, Icons.fingerprint, 'Chấm công', () => onWebModule('attendance')),
-                      _child(context, Icons.task_alt, 'Công việc hằng ngày', () => onWebModule('tasks')),
                       _child(context, Icons.calendar_month_outlined, 'Lịch làm việc', () => onWebModule('schedule')),
                       _child(context, Icons.event_available_outlined, 'Đăng ký lịch làm việc', () => Navigator.push(context, MaterialPageRoute(builder:(_)=>const SchedulePage()))),
-                      _child(context, Icons.schedule_outlined, 'Xin đi trễ / nghỉ / về sớm', () => onWebModule('late_request')),
+                      _section('CÔNG VIỆC & YÊU CẦU'),
+                      _child(context, Icons.task_alt, 'Công việc hằng ngày', () => onWebModule('tasks')),
+                      _child(context, Icons.schedule_outlined, 'Yêu cầu nhân sự', () => onWebModule('late_request')),
+                      _child(context, Icons.gavel_outlined, 'Vi phạm', () => onWebModule('violations')),
+                      _section('LƯƠNG & THU NHẬP'),
                       _child(context, Icons.request_quote_outlined, 'Ứng lương', () => onWebModule('salary_advance')),
                       _child(context, Icons.payments_outlined, 'Bảng lương của tôi', () => onWebModule('payroll')),
-                      _child(context, Icons.gavel_outlined, 'Vi phạm', () => onWebModule('violations')),
                     ]),
                     _parent(context, Icons.settings_outlined, 'Hệ thống', [
                       _child(context, Icons.swap_horiz, 'Chuyển chi nhánh', onSwitchBranch),
                       _child(context, Icons.notifications_none, 'Thông báo', onNotifications),
-                      _child(context, Icons.sync, 'Đồng bộ dữ liệu', onRefresh),
+                      _child(context, Icons.tune_rounded, 'Cài đặt thông báo', onNotificationSettings),
                       _child(context, Icons.lock_outline, 'Đổi mật khẩu', () => _changePassword(context)),
                       _child(context, Icons.print_outlined, 'Cài đặt máy in', () => Navigator.push(context, MaterialPageRoute(builder:(_)=>const PrinterSettingsPage()))),
-                      _child(context, Icons.settings_outlined, 'Thiết lập app', () => onWebModule('settings')),
                       _child(context, Icons.logout, 'Đăng xuất', onLogout),
                     ]),
                   ],
                 ),
               ),
               const Padding(
-                padding: EdgeInsets.all(14),
-                child: Text('FIC POS Mobile • V$ficPosMobileVersion', style: TextStyle(color: Colors.black45)),
+                padding: EdgeInsets.fromLTRB(14, 10, 14, 14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Liên hệ FIC', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.black54)),
+                  SizedBox(height: 3),
+                  Text('Email: vanvuongfic@gmail.com', style: TextStyle(fontSize: 12, color: Colors.black45)),
+                  Text('Điện thoại: 0905338886', style: TextStyle(fontSize: 12, color: Colors.black45)),
+                  SizedBox(height: 7),
+                  Text('FIC POS Mobile • V$ficPosMobileVersion', style: TextStyle(color: Colors.black45)),
+                ]),
               ),
             ],
             ),
@@ -2531,6 +2655,22 @@ class AppMenu extends StatelessWidget {
         title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         childrenPadding: const EdgeInsets.only(left: 14),
         children: children,
+      );
+
+  Widget _section(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 12, 5),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: .7,
+              color: Colors.black45,
+            ),
+          ),
+        ),
       );
 
   Widget _child(BuildContext context, IconData icon, String text, VoidCallback tap) => ListTile(
@@ -2806,6 +2946,7 @@ class _OrderState extends State<OrderPage> {
     String debtMethod = 'tienmat',
     String? dueDate,
     int redeemPoints = 0,
+    bool printAfterPayment = false,
   }) async {
     final localInvoiceCode = 'OFF-${DateTime.now().millisecondsSinceEpoch}';
     // V1.13.8: khi hóa đơn được chốt offline, khóa kết quả khuyến mãi ngay tại thời điểm phát hành.
@@ -2846,28 +2987,22 @@ class _OrderState extends State<OrderPage> {
     await _queueCurrentOffline(payment: payment);
     await OfflineStore.finalizeInvoice(tableId: tableId, orderData: next, payment: payment);
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dc) => AlertDialog(
-        icon: const Icon(Icons.cloud_off_outlined, size: 46),
-        title: const Text('Thanh toán thành công'),
-        content: Text((method == 'chuyenkhoan' || (method == 'ket_hop' && bankAmount > 0))
-            ? 'Hóa đơn $localInvoiceCode đã được tạo trên máy. Thanh toán chuyển khoản được xem là đã hoàn tất và sẽ tự đồng bộ khi có Internet.'
-            : 'Hóa đơn $localInvoiceCode đã được tạo trên máy và sẽ tự đồng bộ lên hệ thống khi có Internet.'),
-        actions: [
-          OutlinedButton.icon(
-            onPressed: () async {
-              Navigator.pop(dc);
-              await _openOfflinePrint('invoice', payment: payment);
-            },
-            icon: const Icon(Icons.print_outlined),
-            label: const Text('In hóa đơn'),
-          ),
-          FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong')),
-        ],
-      ),
-    );
+    if (printAfterPayment) {
+      await _openOfflinePrint('invoice', payment: payment);
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dc) => AlertDialog(
+          icon: const Icon(Icons.cloud_off_outlined, size: 46),
+          title: const Text('Thanh toán thành công'),
+          content: Text((method == 'chuyenkhoan' || (method == 'ket_hop' && bankAmount > 0))
+              ? 'Hóa đơn $localInvoiceCode đã được tạo trên máy. Thanh toán chuyển khoản được xem là đã hoàn tất và sẽ tự đồng bộ khi có Internet.'
+              : 'Hóa đơn $localInvoiceCode đã được tạo trên máy và sẽ tự đồng bộ lên hệ thống khi có Internet.'),
+          actions: [FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong'))],
+        ),
+      );
+    }
     // V1.13.0: payment is a terminal action for this order screen.
     // Match the online flow: after the user acknowledges success, leave OrderPage immediately.
     // finalizeInvoice() has already persisted the invoice, removed the local order cache and marked
@@ -3678,13 +3813,20 @@ class _OrderState extends State<OrderPage> {
     final branch = widget.bootstrap['branch'] is Map
         ? Map<String, dynamic>.from(widget.bootstrap['branch'] as Map)
         : <String, dynamic>{};
+    final store = widget.bootstrap['store'] is Map
+        ? Map<String, dynamic>.from(widget.bootstrap['store'] as Map)
+        : (widget.bootstrap['cuahang'] is Map ? Map<String, dynamic>.from(widget.bootstrap['cuahang'] as Map) : <String,dynamic>{});
+    String firstText(List<dynamic> values) { for (final v in values) { final x='${v ?? ''}'.trim(); if(x.isNotEmpty && x.toLowerCase()!='null') return x; } return ''; }
+    final offlineStoreName = firstText([widget.bootstrap['store_name'], widget.bootstrap['ten_cuahang'], widget.bootstrap['tencuahang'], store['ten'], store['tencuahang'], store['name']]);
+    final offlineLogo = firstText([branch['logo_url'], branch['logo_path'], branch['logo'], store['logo_url'], store['logo_path'], store['logo'], widget.bootstrap['logo_url'], widget.bootstrap['store_logo_url'], widget.bootstrap['store_logo']]);
     final print = <String, dynamic>{
-      // Offline uses the same receipt renderer/layout as Web POS. Only the data
-      // source changes to cached bootstrap + local order; VietQR stays local.
-      'store_name': '${widget.bootstrap['store_name'] ?? 'FIC POS'}',
-      'branch_name': '${branch['ten'] ?? ''}',
-      'address': '${branch['diachi'] ?? ''}',
-      'phone': '${branch['dienthoai'] ?? branch['sodienthoai'] ?? ''}',
+      // Offline keeps the real tenant identity cached from bootstrap. Never replace
+      // a missing store logo/name with FIC POS branding on a customer receipt.
+      'store_name': offlineStoreName,
+      'branch_name': firstText([branch['ten'], branch['tenchinhanh'], branch['name']]),
+      'address': firstText([branch['diachi'], branch['address'], store['diachi'], store['address']]),
+      'phone': firstText([branch['dienthoai'], branch['sodienthoai'], branch['phone'], store['dienthoai'], store['phone']]),
+      'logo_url': offlineLogo,
       'payment_qr': '',
       'show_payment_qr': bank['bin'] != null && '${bank['bin']}'.trim().isNotEmpty
           && bank['account_no'] != null && '${bank['account_no']}'.trim().isNotEmpty,
@@ -3827,10 +3969,11 @@ class _OrderState extends State<OrderPage> {
     String? dueDate,
     int redeemPoints = 0,
     Map<String,dynamic> einvoice = const <String,dynamic>{},
+    bool printAfterPayment = false,
   }) async {
     if (orderCode == null) return;
     if (_offlineNow) {
-      await _saveLocalPayment(method, customerCash: customerCash, cashAmount: cashAmount, bankAmount: bankAmount, debtReceived: debtReceived, debtMethod: debtMethod, dueDate: dueDate, redeemPoints: redeemPoints);
+      await _saveLocalPayment(method, customerCash: customerCash, cashAmount: cashAmount, bankAmount: bankAmount, debtReceived: debtReceived, debtMethod: debtMethod, dueDate: dueDate, redeemPoints: redeemPoints, printAfterPayment: printAfterPayment);
       return;
     }
     try {
@@ -3852,39 +3995,35 @@ class _OrderState extends State<OrderPage> {
       final amount = num.tryParse('${payment['phaitra'] ?? payable}') ?? payable;
       final change = num.tryParse('${payment['tien_thoi'] ?? 0}') ?? 0;
       final debt = num.tryParse('${payment['con_no'] ?? 0}') ?? 0;
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dc) => AlertDialog(
-          icon: Icon(debt > 0 ? Icons.receipt_long_outlined : Icons.check_circle, size: 48),
-          title: Text(debt > 0 ? 'Đã ghi nhận bán nợ' : 'Thanh toán thành công'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Hóa đơn: ${payment['ma_thanhtoan'] ?? ''}'),
-              Text('Tổng phải trả: ${money(amount)} đ'),
-              if (debt > 0) Text('Còn nợ: ${money(debt)} đ', style: const TextStyle(fontWeight: FontWeight.w800)),
-              if (change > 0) Text('Tiền thừa: ${money(change)} đ'),
-            ],
+      if (printAfterPayment && paymentId.isNotEmpty) {
+        await openPrint('invoice', paymentId);
+      } else {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dc) => AlertDialog(
+            icon: Icon(debt > 0 ? Icons.receipt_long_outlined : Icons.check_circle, size: 48),
+            title: Text(debt > 0 ? 'Đã ghi nhận bán nợ' : 'Thanh toán thành công'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Hóa đơn: ${payment['ma_thanhtoan'] ?? ''}'),
+                Text('Tổng phải trả: ${money(amount)} đ'),
+                if (debt > 0) Text('Còn nợ: ${money(debt)} đ', style: const TextStyle(fontWeight: FontWeight.w800)),
+                if (change > 0) Text('Tiền thừa: ${money(change)} đ'),
+              ],
+            ),
+            actions: [FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong'))],
           ),
-          actions: [
-            if (paymentId.isNotEmpty)
-              OutlinedButton.icon(
-                onPressed: () => openPrint('invoice', paymentId),
-                icon: const Icon(Icons.print_outlined),
-                label: const Text('In hóa đơn'),
-              ),
-            FilledButton(onPressed: () => Navigator.pop(dc), child: const Text('Xong')),
-          ],
-        ),
-      );
+        );
+      }
       await Future<void>.delayed(Duration.zero);
       if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop(true);
     } catch (e) {
       if (_isNetworkError(e)) {
         await _enterOfflineMode();
-        await _saveLocalPayment(method, customerCash: customerCash, cashAmount: cashAmount, bankAmount: bankAmount, debtReceived: debtReceived, debtMethod: debtMethod, dueDate: dueDate, redeemPoints: redeemPoints);
+        await _saveLocalPayment(method, customerCash: customerCash, cashAmount: cashAmount, bankAmount: bankAmount, debtReceived: debtReceived, debtMethod: debtMethod, dueDate: dueDate, redeemPoints: redeemPoints, printAfterPayment: printAfterPayment);
       } else {
         _toast(e.toString().replaceFirst('Exception: ', ''));
       }
@@ -4544,13 +4683,17 @@ class _OrderState extends State<OrderPage> {
                 Expanded(
                   child: GridView.builder(
                     padding: const EdgeInsets.all(10),
-                    gridDelegate:
-                        SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: isLandscape ? 4 : 2,
-                      childAspectRatio: isLandscape ? 1.9 : 1.25,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
+                    gridDelegate: (() {
+                      final size = MediaQuery.sizeOf(context);
+                      final tablet = size.shortestSide >= 600;
+                      final columns = tablet ? (isLandscape ? (size.width >= 1180 ? 5 : 4) : 3) : (isLandscape ? 4 : 2);
+                      return SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        childAspectRatio: tablet ? (isLandscape ? 1.55 : 1.35) : (isLandscape ? 1.9 : 1.25),
+                        crossAxisSpacing: tablet ? 10 : 8,
+                        mainAxisSpacing: tablet ? 10 : 8,
+                      );
+                    })(),
                     itemCount: products.length,
                     itemBuilder: (_, i) {
                       final p = products[i] as Map;
@@ -4906,6 +5049,7 @@ class _OrderState extends State<OrderPage> {
     final loyalty = (preview?['loyalty'] as Map?) ?? {};
     final einvoiceEnabled = preview?['einvoice_enabled'] == true || '${preview?['einvoice_enabled']}' == '1';
     bool requestEinvoice = false;
+    bool printAfterPayment = false;
     final maxRedeemPoints = int.tryParse('${loyalty['max_redeem_points'] ?? 0}') ?? 0;
     final pointValue = num.tryParse('${loyalty['point_value'] ?? 0}') ?? 0;
     String method = 'tienmat';
@@ -4979,6 +5123,7 @@ class _OrderState extends State<OrderPage> {
             debtMethod: debtMethod,
             dueDate: dueDate == null ? null : '${dueDate!.year.toString().padLeft(4,'0')}-${dueDate!.month.toString().padLeft(2,'0')}-${dueDate!.day.toString().padLeft(2,'0')}',
             redeemPoints: redeemPoints,
+            printAfterPayment: printAfterPayment,
             einvoice: requestEinvoice ? <String,dynamic>{
               'yeucau_hoadon': true,
               'hddt_ten_cong_ty': einvoiceCompany.text.trim(),
@@ -5035,15 +5180,15 @@ class _OrderState extends State<OrderPage> {
               ]),
               const SizedBox(height: 14),
               if (method == 'tienmat') ...[
-                TextField(controller: cash, keyboardType: TextInputType.number, onChanged: (_) => setSheetState(() {}), decoration: const InputDecoration(labelText: 'Tiền khách đưa', prefixIcon: Icon(Icons.payments_outlined))),
+                TextField(controller: cash, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], onChanged: (_) => setSheetState(() {}), decoration: const InputDecoration(labelText: 'Tiền khách đưa', prefixIcon: Icon(Icons.payments_outlined))),
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Tiền thừa'), Text('${money((value(cash)-finalPayable).clamp(0, double.infinity))} đ', style: const TextStyle(fontWeight: FontWeight.w700))]),
               ],
               if (method == 'ket_hop') ...[
                 Row(children: [
-                  Expanded(child: TextField(controller: mixedCash, keyboardType: TextInputType.number, onChanged: (v) { final c=value(mixedCash); if(c<=finalPayable) mixedBank.text=(finalPayable-c).round().toString(); setSheetState((){}); }, decoration: const InputDecoration(labelText: 'Tiền mặt'))),
+                  Expanded(child: TextField(controller: mixedCash, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], onChanged: (v) { final c=value(mixedCash); if(c<=finalPayable) mixedBank.text=(finalPayable-c).round().toString(); setSheetState((){}); }, decoration: const InputDecoration(labelText: 'Tiền mặt'))),
                   const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: mixedBank, keyboardType: TextInputType.number, onChanged: (v) { final b=value(mixedBank); if(b<=finalPayable) mixedCash.text=(finalPayable-b).round().toString(); setSheetState((){}); }, decoration: const InputDecoration(labelText: 'Chuyển khoản'))),
+                  Expanded(child: TextField(controller: mixedBank, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], onChanged: (v) { final b=value(mixedBank); if(b<=finalPayable) mixedCash.text=(finalPayable-b).round().toString(); setSheetState((){}); }, decoration: const InputDecoration(labelText: 'Chuyển khoản'))),
                 ]),
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Còn thiếu'), Text('${money(mixedRemain > 0 ? mixedRemain : 0)} đ', style: TextStyle(fontWeight: FontWeight.w800, color: mixedRemain.abs()<0.01 ? Colors.green : Colors.red))]),
@@ -5051,7 +5196,7 @@ class _OrderState extends State<OrderPage> {
               if (method == 'ghi_no') ...[
                 if (!hasCustomer) Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.orange.withValues(alpha: .12), borderRadius: BorderRadius.circular(10)), child: const Text('Ghi nợ yêu cầu đơn phải chọn khách hàng.', style: TextStyle(fontWeight: FontWeight.w600))),
                 const SizedBox(height: 8),
-                TextField(controller: debtReceived, keyboardType: TextInputType.number, onChanged: (_) => setSheetState(() {}), decoration: const InputDecoration(labelText: 'Thu trước (có thể để 0)')),
+                TextField(controller: debtReceived, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], onChanged: (_) => setSheetState(() {}), decoration: const InputDecoration(labelText: 'Thu trước (có thể để 0)')),
                 const SizedBox(height: 10),
                 SegmentedButton<String>(segments: const [ButtonSegment(value:'tienmat', label:Text('Tiền mặt')), ButtonSegment(value:'chuyenkhoan', label:Text('Chuyển khoản'))], selected:{debtMethod}, onSelectionChanged:(v)=>setSheetState(()=>debtMethod=v.first)),
                 const SizedBox(height: 10),
@@ -5080,7 +5225,17 @@ class _OrderState extends State<OrderPage> {
                   TextField(controller: einvoiceBuyer, decoration: const InputDecoration(labelText:'Tên người mua (không bắt buộc)')),
                 ],
               ],
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: printAfterPayment,
+                onChanged: (v) => setSheetState(() => printAfterPayment = v ?? false),
+                secondary: const Icon(Icons.print_outlined),
+                title: const Text('In hóa đơn sau khi thanh toán', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Bật để tự mở hóa đơn ngay sau khi thanh toán thành công.'),
+              ),
+              const SizedBox(height: 10),
               FilledButton.icon(onPressed: submit, icon: const Icon(Icons.check_circle_outline), label: Text(method=='ghi_no'?'Xác nhận ghi nợ':'Xác nhận thanh toán'), style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14))),
             ],
           )),
@@ -5106,6 +5261,7 @@ Widget ficModulePage(String module) {
     case 'schedule': return const WorkSchedulePage();
     case 'late_request': return const LateRequestPage();
     case 'salary_advance': return const SalaryAdvancePage();
+    case 'payroll': return const PayrollPage();
     case 'daily_report': return const DailyReportPage();
     default: return NativeModulePage(module: module);
   }
@@ -5590,7 +5746,7 @@ class _CashbookPageState extends State<CashbookPage>{
                       onChanged: (v) => setD(() => category = v),
                     ),
                     const SizedBox(height: 8),
-                    TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Số tiền', suffixText: 'đ')),
+                    TextField(controller: amount, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], decoration: const InputDecoration(labelText: 'Số tiền', suffixText: 'đ')),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
                       value: method,
@@ -5932,7 +6088,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
                               children: [
                                 Expanded(child: TextField(controller: l['qty'], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: const InputDecoration(labelText: 'SL'))),
                                 const SizedBox(width: 8),
-                                Expanded(child: TextField(controller: l['price'], keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá nhập'))),
+                                Expanded(child: TextField(controller: l['price'], keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], decoration: const InputDecoration(labelText: 'Giá nhập'))),
                                 IconButton(
                                   onPressed: lines.length > 1 ? () => setD(() => lines.removeAt(i)) : null,
                                   icon: const Icon(Icons.delete_outline),
@@ -5954,7 +6110,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
                     label: const Text('Thêm dòng'),
                   ),
                   const SizedBox(height: 6),
-                  TextField(controller: paid, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Đã thanh toán')),
+                  TextField(controller: paid, keyboardType: TextInputType.number, inputFormatters: const [_FicMoneyInputFormatter()], decoration: const InputDecoration(labelText: 'Đã thanh toán')),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: paymentMethod,
@@ -5978,16 +6134,16 @@ class _PurchasesPageState extends State<PurchasesPage> {
                 final items = lines.map((l) => {
                   'product_id': (l['product'] as Map)['id'],
                   'qty': int.tryParse((l['qty'] as TextEditingController).text) ?? 0,
-                  'price': num.tryParse((l['price'] as TextEditingController).text) ?? 0,
+                  'price': _ficMoneyInputValue((l['price'] as TextEditingController).text),
                 }).toList();
                 final payload=<String,dynamic>{
                   'supplier_id': supplier,
-                  'paid': num.tryParse(paid.text) ?? 0,
+                  'paid': _ficMoneyInputValue(paid.text),
                   'payment_method': paymentMethod,
                   'note': note.text.trim(),
                   'items': items,
                 };
-                if ((num.tryParse(paid.text) ?? 0) > 0) {
+                if (_ficMoneyInputValue(paid.text) > 0) {
                   final shiftOk = await ficEnsureMoneyShift(context, purpose: 'thanh toán tiền nhập hàng');
                   if (!shiftOk) return;
                 }
@@ -6092,14 +6248,14 @@ class _PurchaseDetailPageState extends State<PurchaseDetailPage>{
       title:const Text('Nhận tiền NCC hoàn'),
       content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
         Text('NCC còn phải hoàn: ${money(due)} đ'),const SizedBox(height:12),
-        TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Số tiền thực nhận')),
+        TextField(controller:amount,keyboardType:TextInputType.number,inputFormatters:const [_FicMoneyInputFormatter()],decoration:const InputDecoration(labelText:'Số tiền thực nhận')),
         const SizedBox(height:10),SegmentedButton<int>(segments:const [ButtonSegment(value:1,label:Text('Tiền mặt')),ButtonSegment(value:2,label:Text('Chuyển khoản'))],selected:{method},onSelectionChanged:(v)=>setD(()=>method=v.first)),
         const SizedBox(height:10),TextField(controller:note,decoration:const InputDecoration(labelText:'Ghi chú')),
       ])),
       actions:[TextButton(onPressed:()=>Navigator.pop(dc,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(dc,true),child:const Text('Đã nhận tiền'))],
     )));
     if(ok!=true)return;
-    final value=num.tryParse(amount.text.replaceAll(',','').trim())??0;
+    final value=_ficMoneyInputValue(amount.text);
     if(value<=0||value>due){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Số tiền nhận không hợp lệ.')));return;}
     try{await api.post('/purchases/${widget.id}/refund-receipt',{'amount':value,'method':method,'note':note.text.trim()});if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã ghi Phiếu thu tiền NCC hoàn.')));await load();}
     catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));}
@@ -6438,10 +6594,13 @@ class _TasksPageState extends State<TasksPage> {
       appBar:AppBar(title:const Text('Công việc hằng ngày')),
       body:loading?const Center(child:CircularProgressIndicator()):ListView(
         padding:const EdgeInsets.all(14),
-        children:rows.map((e){
-          final m=e as Map; final donev=int.tryParse('${m['trangthai']}')==1;
-          return Card(child:CheckboxListTile(value:donev,onChanged:donev?null:(_)=>done(m),title:Text('${m['tencongviec']??m['noidung']??'Công việc'}'),subtitle:Text('${m['ghichu']??''}')));
-        }).toList(),
+        children:[
+          if(ficOfflineMode) ficOfflineReadNotice(null),
+          ...rows.map((e){
+            final m=e as Map; final donev=int.tryParse('${m['trangthai']}')==1;
+            return Card(child:CheckboxListTile(value:donev,onChanged:donev?null:(_)=>done(m),title:Text('${m['tencongviec']??m['noidung']??'Công việc'}'),subtitle:Text('${m['ghichu']??''}')));
+          }),
+        ],
       ),
     );
   }
@@ -6754,17 +6913,22 @@ class WorkSchedulePage extends StatefulWidget {
 }
 
 class _WorkSchedulePageState extends State<WorkSchedulePage>{
-  bool loading=true; Map data={}; String? error;
+  bool loading=true,showingOffline=false; Map data={}; String? error; String? cacheUpdatedAt;
 
   @override void initState(){super.initState();load();}
 
   Future<void> load() async {
     if(mounted)setState((){loading=true;error=null;});
+    final cached=await ficReadReadCache('work_schedule');
+    cacheUpdatedAt=await ficReadCacheUpdatedAt('work_schedule');
+    if(ficOfflineMode){
+      if(cached!=null){data=cached;showingOffline=true;}else{error='Chưa có dữ liệu lịch làm việc offline. Hãy đăng nhập khi có internet ít nhất một lần.';}
+      if(mounted)setState(()=>loading=false); return;
+    }
     try{
-      final r=await api.get('/work-schedule');
-      data=(r['data'] as Map?)??{};
+      final r=await api.get('/work-schedule'); data=(r['data'] as Map?)??{}; showingOffline=false; await ficWriteReadCache('work_schedule',data); cacheUpdatedAt=await ficReadCacheUpdatedAt('work_schedule');
     }catch(e){
-      error=e.toString().replaceFirst('Exception: ','');
+      if(cached!=null){data=cached;showingOffline=true;error=null;}else{error=e.toString().replaceFirst('Exception: ','');}
     }
     if(mounted)setState(()=>loading=false);
   }
@@ -6800,6 +6964,30 @@ class _WorkSchedulePageState extends State<WorkSchedulePage>{
       }
     }
     return null;
+  }
+
+  Future<void> _requestLate(Map row) async {
+    final reason=TextEditingController();
+    final time=TextEditingController();
+    await showDialog<void>(context:context,builder:(dc)=>AlertDialog(
+      title:const Text('Xin đi trễ'),
+      content:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:time,decoration:const InputDecoration(labelText:'Giờ dự kiến đến (HH:mm)')),
+        TextField(controller:reason,maxLines:2,decoration:const InputDecoration(labelText:'Lý do')),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(dc),child:const Text('Hủy')),
+        FilledButton(onPressed:() async {
+          final scheduleId=int.tryParse('${row['id']}');
+          if(scheduleId==null || time.text.trim().isEmpty || reason.text.trim().isEmpty){
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Vui lòng nhập giờ dự kiến đến và lý do.'))); return;
+          }
+          await api.post('/late-requests',{'schedule_id':scheduleId,'reason':reason.text.trim(),'arrival_time':time.text.trim()});
+          if(dc.mounted)Navigator.pop(dc);
+          if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã gửi yêu cầu xin đi trễ.')));
+        },child:const Text('Gửi yêu cầu')),
+      ],
+    ));
   }
 
   Widget _table(List days,List shifts,List rows){
@@ -6878,25 +7066,28 @@ class _WorkSchedulePageState extends State<WorkSchedulePage>{
                       );
                     }
                     final position='${row['vitrilamviec']??''}'.trim();
-                    return Container(
-                      constraints:const BoxConstraints(minHeight:76),
-                      padding:const EdgeInsets.symmetric(horizontal:6,vertical:8),
-                      color:const Color(0xffeef8f0),
-                      child:Column(
-                        mainAxisAlignment:MainAxisAlignment.center,
-                        mainAxisSize:MainAxisSize.min,
-                        children:[
-                          const Icon(Icons.check_circle,color:Color(0xff2e7d32),size:22),
-                          const SizedBox(height:3),
-                          const Text('Làm',textAlign:TextAlign.center,
-                            style:TextStyle(fontWeight:FontWeight.w800,color:Color(0xff256b2a))),
-                          if(position.isNotEmpty)...[
+                    return InkWell(
+                      onTap:()=>_requestLate(row),
+                      child:Container(
+                        constraints:const BoxConstraints(minHeight:76),
+                        padding:const EdgeInsets.symmetric(horizontal:6,vertical:8),
+                        color:const Color(0xffeef8f0),
+                        child:Column(
+                          mainAxisAlignment:MainAxisAlignment.center,
+                          mainAxisSize:MainAxisSize.min,
+                          children:[
+                            const Icon(Icons.check_circle,color:Color(0xff2e7d32),size:22),
                             const SizedBox(height:3),
-                            Text(position,textAlign:TextAlign.center,
-                              maxLines:2,overflow:TextOverflow.ellipsis,
-                              style:const TextStyle(fontSize:11)),
+                            const Text('Làm',textAlign:TextAlign.center,
+                              style:TextStyle(fontWeight:FontWeight.w800,color:Color(0xff256b2a))),
+                            if(position.isNotEmpty)...[
+                              const SizedBox(height:3),
+                              Text(position,textAlign:TextAlign.center,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:11)),
+                            ],
+                            const SizedBox(height:4),
+                            const Text('Xin đi trễ',style:TextStyle(fontSize:10,fontWeight:FontWeight.w700,color:Colors.blue)),
                           ],
-                        ],
+                        ),
                       ),
                     );
                   }),
@@ -6933,6 +7124,7 @@ class _WorkSchedulePageState extends State<WorkSchedulePage>{
               physics:const AlwaysScrollableScrollPhysics(),
               padding:const EdgeInsets.fromLTRB(12,12,12,24),
               children:[
+                if(showingOffline) ficOfflineReadNotice(cacheUpdatedAt),
                 Row(children:[
                   const Icon(Icons.calendar_month_outlined,size:20),
                   const SizedBox(width:7),
@@ -6989,29 +7181,11 @@ class _LateRequestPageState extends State<LateRequestPage>{
   @override void initState(){super.initState();load();}
   Future<void> load() async {setState((){loading=true;page=1;hasMore=true;});final r=await api.get('/late-requests?page=1&per_page=20');data=(r['data'] as Map?)??{};hasMore=((data['pagination'] as Map?)?['has_more']==true);if(mounted)setState(()=>loading=false);}
   Future<void> loadMore()async{if(loadingMore||!hasMore)return;setState(()=>loadingMore=true);try{final next=page+1;final r=await api.get('/late-requests?page=$next&per_page=20');final d=(r['data'] as Map?)??{};data['requests']=[...List.from(data['requests'] as List? ?? []),...List.from(d['requests'] as List? ?? [])];data['pagination']=d['pagination'];page=next;hasMore=((d['pagination'] as Map?)?['has_more']==true);}finally{if(mounted)setState(()=>loadingMore=false);}}
-  Future<void> create() async {
-    final id=TextEditingController(),reason=TextEditingController(),time=TextEditingController();
-    await showDialog<void>(
-      context:context,
-      builder:(dc)=>AlertDialog(
-        title:const Text('Xin đi trễ'),
-        content:Column(mainAxisSize:MainAxisSize.min,children:[
-          TextField(controller:id,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'ID ca làm việc')),
-          TextField(controller:time,decoration:const InputDecoration(labelText:'Giờ dự kiến đến (HH:mm)')),
-          TextField(controller:reason,maxLines:2,decoration:const InputDecoration(labelText:'Lý do')),
-        ]),
-        actions:[
-          TextButton(onPressed:()=>Navigator.pop(dc),child:const Text('Hủy')),
-          FilledButton(onPressed:() async {await api.post('/late-requests',{'schedule_id':int.tryParse(id.text),'reason':reason.text.trim(),'arrival_time':time.text.trim()});if(dc.mounted)Navigator.pop(dc);await load();},child:const Text('Gửi')),
-        ],
-      ),
-    );
-  }
   @override Widget build(BuildContext context){
     final rows=List.from(data['requests'] as List? ?? []);
     return Scaffold(
-      appBar:AppBar(title:const Text('Xin đi trễ')),
-      floatingActionButton:FloatingActionButton.extended(onPressed:create,icon:const Icon(Icons.add),label:const Text('Tạo yêu cầu')),
+      appBar:AppBar(title:const Text('Yêu cầu nhân sự')),
+      floatingActionButton:null,
       body:loading?const Center(child:CircularProgressIndicator()):NotificationListener<ScrollNotification>(onNotification:(n){if(n.metrics.pixels>=n.metrics.maxScrollExtent-240)loadMore();return false;},child:ListView(padding:const EdgeInsets.all(14),children:[...rows.map((e){final m=e as Map;return Card(child:ListTile(title:Text('${m['ly_do']??m['lydo']??'Xin đi trễ'}'),subtitle:Text('${m['thoigian_den']??''} • Trạng thái: ${m['trangthai']??''}')));}),if(loadingMore)const Padding(padding:EdgeInsets.all(16),child:Center(child:CircularProgressIndicator(strokeWidth:2)))])),
     );
   }
@@ -7022,14 +7196,19 @@ class SalaryAdvancePage extends StatefulWidget {
   @override State<SalaryAdvancePage> createState()=>_SalaryAdvancePageState();
 }
 class _SalaryAdvancePageState extends State<SalaryAdvancePage>{
-  bool loading=true,loadingMore=false,hasMore=true; int page=1; Map data={};
+  bool loading=true,loadingMore=false,hasMore=true; int page=1; Map data={}; String? error;
   @override void initState(){super.initState();load();}
+  static const String _internetRequired='Để ứng lương bạn cần phải có internet';
+  void _showInternetRequired(){if(!mounted)return;ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(_internetRequired)));}
   Future<void> load() async {
-    setState((){loading=true;page=1;hasMore=true;});
-    final r=await api.get('/salary-advances?page=1&per_page=20');
-    data=(r['data'] as Map?)??{};
-    hasMore=((data['pagination'] as Map?)?['has_more']==true);
-    if(mounted)setState(()=>loading=false);
+    if(ficOfflineMode){if(mounted)setState((){loading=false;error=_internetRequired;data={};});return;}
+    if(mounted)setState((){loading=true;page=1;hasMore=true;error=null;});
+    try{
+      final r=await api.get('/salary-advances?page=1&per_page=20');
+      data=(r['data'] as Map?)??{};
+      hasMore=((data['pagination'] as Map?)?['has_more']==true);
+    }catch(e){error=e.toString().replaceFirst('Exception: ','');}
+    finally{if(mounted)setState(()=>loading=false);}
   }
   Future<void> loadMore() async {
     if(loadingMore||!hasMore)return;
@@ -7040,37 +7219,142 @@ class _SalaryAdvancePageState extends State<SalaryAdvancePage>{
       final d=(r['data'] as Map?)??{};
       data['requests']=[...List.from(data['requests'] as List? ?? []),...List.from(d['requests'] as List? ?? [])];
       data['pagination']=d['pagination'];
-      if(d['payroll_months']!=null)data['payroll_months']=d['payroll_months'];
-      page=next;
-      hasMore=((d['pagination'] as Map?)?['has_more']==true);
+      page=next; hasMore=((d['pagination'] as Map?)?['has_more']==true);
     }finally{if(mounted)setState(()=>loadingMore=false);}
   }
-  Future<void> create() async {
-    final amount=TextEditingController(),note=TextEditingController(); int method=1; final now=DateTime.now(); final month=TextEditingController(text:'${now.month.toString().padLeft(2,'0')}-${now.year}');
-    await showDialog<void>(
-      context:context,
-      builder:(dc)=>StatefulBuilder(builder:(dc,setD)=>AlertDialog(
-        title:const Text('Ứng lương'),
-        content:Column(mainAxisSize:MainAxisSize.min,children:[
-          TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Số tiền ứng')),
-          TextField(controller:month,decoration:const InputDecoration(labelText:'Tháng lương MM-YYYY')),
-          DropdownButtonFormField<int>(value:method,decoration:const InputDecoration(labelText:'Hình thức nhận'),items:const [DropdownMenuItem(value:1,child:Text('Tiền mặt')),DropdownMenuItem(value:2,child:Text('Chuyển khoản'))],onChanged:(v)=>setD(()=>method=v??1)),
-          TextField(controller:note,decoration:const InputDecoration(labelText:'Ghi chú')),
-        ]),
-        actions:[
-          TextButton(onPressed:()=>Navigator.pop(dc),child:const Text('Hủy')),
-          FilledButton(onPressed:() async {await api.post('/salary-advances',{'amount':num.tryParse(amount.text)??0,'method':method,'month':month.text.trim(),'note':note.text.trim()});if(dc.mounted)Navigator.pop(dc);await load();},child:const Text('Gửi yêu cầu')),
-        ],
-      )),
-    );
+  List<String> _months(){
+    final out=<String>[];
+    for(final raw in List.from(data['payroll_months'] as List? ?? const [])){
+      final v=raw is Map?'${raw['bangluongthang']??raw['month']??''}':'$raw';
+      if(v.trim().isNotEmpty&&!out.contains(v.trim()))out.add(v.trim());
+    }
+    if(out.isEmpty){final n=DateTime.now();out.add('${n.month.toString().padLeft(2,'0')}-${n.year}');}
+    return out;
   }
+  Map _limitFor(String month){
+    final all=data['advance_limits'];
+    if(all is Map && all[month] is Map)return all[month] as Map;
+    return (data['advance_limit'] as Map?)??{};
+  }
+  Future<void> create() async {
+    if(ficOfflineMode){_showInternetRequired();return;}
+    final months=_months(); String selectedMonth=months.first; int method=1; bool sending=false; String? dialogError;
+    final amount=TextEditingController(),note=TextEditingController();
+    await showDialog<void>(context:context,builder:(dialogContext)=>StatefulBuilder(builder:(dc,setD){
+      final lim=_limitFor(selectedMonth);
+      final earned=num.tryParse('${lim['earned']??0}')??0, max=num.tryParse('${lim['limit']??0}')??0;
+      final exposure=num.tryParse('${lim['exposure']??0}')??0, remaining=num.tryParse('${lim['remaining']??data['available_amount']??0}')??0;
+      Future<void> submit() async {
+        if(sending)return;
+        if(ficOfflineMode){setD(()=>dialogError=_internetRequired);return;}
+        final raw=amount.text.replaceAll(RegExp(r'[^0-9]'),''); final value=num.tryParse(raw)??0;
+        if(value<=0){setD(()=>dialogError='Vui lòng nhập số tiền muốn ứng.');return;}
+        if(remaining>0 && value>remaining){setD(()=>dialogError='Số tiền vượt hạn mức. Bạn còn có thể ứng ${money(remaining)} đ.');return;}
+        setD((){sending=true;dialogError=null;});
+        try{
+          await api.post('/salary-advances',{'amount':value,'method':method,'month':selectedMonth,'note':note.text.trim()});
+          if(dialogContext.mounted)Navigator.pop(dialogContext);
+          if(mounted){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã gửi yêu cầu ứng lương.')));await load();}
+        }catch(e){if(dialogContext.mounted){final msg=e.toString().replaceFirst('Exception: ','');setD((){sending=false;dialogError=(ficOfflineMode||msg.toLowerCase().contains('socket')||msg.toLowerCase().contains('network')||msg.toLowerCase().contains('connection'))?_internetRequired:msg;});}}
+      }
+      return AlertDialog(
+        title:const Text('Tạo yêu cầu ứng lương'),
+        content:SingleChildScrollView(child:SizedBox(width:430,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          const Text('Yêu cầu sẽ được chuyển đến quản lý để duyệt.',style:TextStyle(color:Colors.black54)),const SizedBox(height:16),
+          DropdownButtonFormField<String>(value:selectedMonth,decoration:const InputDecoration(labelText:'Tháng lương'),items:months.map((m)=>DropdownMenuItem(value:m,child:Text(m))).toList(),onChanged:sending?null:(v)=>setD(()=>selectedMonth=v??selectedMonth)),
+          const SizedBox(height:12),
+          Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(borderRadius:BorderRadius.circular(12),color:Theme.of(dc).colorScheme.primaryContainer.withOpacity(.35)),child:Column(children:[
+            _advanceLine('Lương đã tính đến hiện tại',earned),_advanceLine('Hạn mức 50%',max),_advanceLine('Đã ứng / đang chờ',exposure),const Divider(),_advanceLine('Còn có thể ứng',remaining,bold:true),
+          ])),const SizedBox(height:12),
+          TextField(controller:amount,enabled:!sending,keyboardType:TextInputType.number,inputFormatters:const [_FicMoneyInputFormatter()],decoration:const InputDecoration(labelText:'Số tiền muốn ứng',suffixText:'VND',helperText:'Hệ thống sẽ kiểm tra lại hạn mức khi gửi.')),const SizedBox(height:12),
+          const Text('Phương thức nhận',style:TextStyle(fontWeight:FontWeight.w700)),const SizedBox(height:6),
+          SegmentedButton<int>(segments:const [ButtonSegment(value:1,icon:Icon(Icons.payments_outlined),label:Text('Tiền mặt')),ButtonSegment(value:2,icon:Icon(Icons.account_balance_outlined),label:Text('Chuyển khoản'))],selected:{method},onSelectionChanged:sending?null:(v)=>setD(()=>method=v.first)),const SizedBox(height:12),
+          TextField(controller:note,enabled:!sending,maxLines:3,maxLength:1000,decoration:const InputDecoration(labelText:'Ghi chú (không bắt buộc)',hintText:'Nội dung cần trao đổi với quản lý...')),
+          if(dialogError!=null)Container(margin:const EdgeInsets.only(top:8),padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:Colors.red.shade50,borderRadius:BorderRadius.circular(10)),child:Text(dialogError!,style:TextStyle(color:Colors.red.shade900,fontWeight:FontWeight.w600))),
+        ]))),
+        actions:[TextButton(onPressed:sending?null:()=>Navigator.pop(dialogContext),child:const Text('Hủy')),FilledButton.icon(onPressed:sending?null:submit,icon:sending?const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.send_outlined),label:Text(sending?'Đang gửi...':'Gửi yêu cầu ứng lương'))],
+      );
+    }));
+  }
+  Widget _advanceLine(String label,num value,{bool bold=false})=>Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Expanded(child:Text(label,style:TextStyle(fontWeight:bold?FontWeight.w800:FontWeight.w400))),Text('${money(value)} đ',style:TextStyle(fontWeight:bold?FontWeight.w900:FontWeight.w700))]));
+  String _status(dynamic raw){switch(int.tryParse('$raw')){case 1:return 'Chờ duyệt';case 2:return 'Đã duyệt';case 3:return 'Từ chối';default:return '$raw';}}
   @override Widget build(BuildContext context){
     final rows=List.from(data['requests'] as List? ?? []);
-    return Scaffold(
-      appBar:AppBar(title:const Text('Ứng lương')),
-      floatingActionButton:FloatingActionButton.extended(onPressed:create,icon:const Icon(Icons.add),label:const Text('Ứng lương')),
-      body:loading?const Center(child:CircularProgressIndicator()):NotificationListener<ScrollNotification>(onNotification:(n){if(n.metrics.pixels>=n.metrics.maxScrollExtent-240)loadMore();return false;},child:ListView(padding:const EdgeInsets.all(14),children:[...rows.map((e){final m=e as Map;return Card(child:ListTile(title:Text('${money(num.tryParse('${m['sotienung']}')??0)} đ'),subtitle:Text('${m['luongthang']??''} • ${m['ghichu']??''}'),trailing:Text('TT ${m['trangthai']??''}')));}),if(loadingMore)const Padding(padding:EdgeInsets.all(16),child:Center(child:CircularProgressIndicator(strokeWidth:2)))])),
+    return Scaffold(appBar:AppBar(title:const Text('Ứng lương'),actions:[IconButton(onPressed:loading?null:load,icon:const Icon(Icons.refresh))]),floatingActionButton:FloatingActionButton.extended(onPressed:loading?null:create,icon:const Icon(Icons.add),label:const Text('Ứng lương')),
+      body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(error!,textAlign:TextAlign.center),const SizedBox(height:12),FilledButton(onPressed:load,child:const Text('Thử lại'))]))):RefreshIndicator(onRefresh:load,child:NotificationListener<ScrollNotification>(onNotification:(n){if(n.metrics.pixels>=n.metrics.maxScrollExtent-240)loadMore();return false;},child:ListView(padding:const EdgeInsets.all(14),children:[
+        if(data['available_amount']!=null || data['max_advance']!=null) Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Hạn mức ứng lương',style:TextStyle(fontWeight:FontWeight.w900,fontSize:16)),const SizedBox(height:8),Text('Tối đa: ${money(num.tryParse('${data['max_advance']??0}')??0)} đ'),Text('Còn có thể ứng: ${money(num.tryParse('${data['available_amount']??data['remaining_amount']??0}')??0)} đ',style:const TextStyle(fontWeight:FontWeight.w800))]))),
+        if(rows.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(22),child:Text('Chưa có yêu cầu ứng lương nào.',textAlign:TextAlign.center))),
+        ...rows.map((e){final m=e as Map;final paid=num.tryParse('${m['paid_amount']??m['sotiendatra']??0}')??0;final approved=num.tryParse('${m['sotienungduocduyet']??0}')??0;return Card(child:ListTile(title:Text('${money(num.tryParse('${m['sotienung']??m['amount']??0}')??0)} đ',style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text('Tháng ${m['luongthang']??m['month']??''} • ${_status(m['trangthai']??m['status'])}${approved>0?'\nĐược duyệt: ${money(approved)} đ':''}${paid>0?'\nĐã chi: ${money(paid)} đ':''}${('${m['ghichu']??m['note']??''}').trim().isNotEmpty?'\nBạn: ${m['ghichu']??m['note']}':''}${('${m['ghichu_phanhoi']??''}').trim().isNotEmpty?'\nQuản lý: ${m['ghichu_phanhoi']}':''}'),isThreeLine:true));}),
+        if(loadingMore)const Padding(padding:EdgeInsets.all(16),child:Center(child:CircularProgressIndicator(strokeWidth:2)))
+      ])))
     );
+  }
+}
+
+// V9 Mobile: màn hình bảng lương cá nhân riêng. Backend /payroll vẫn là nguồn sự thật;
+// app chỉ hiển thị dữ liệu của tài khoản đang đăng nhập, không truyền id_nhanvien tùy ý.
+class PayrollPage extends StatefulWidget {
+  const PayrollPage({super.key});
+  @override State<PayrollPage> createState()=>_PayrollPageState();
+}
+class _PayrollPageState extends State<PayrollPage>{
+  bool loading=true,pdfBusy=false,showingOffline=false; Map data={}; String? error; String? selectedMonth; String? cacheUpdatedAt;
+  @override void initState(){super.initState();load();}
+  Future<Map?> _readCache()=>ficReadReadCache('payroll');
+  Future<void> _writeCache(Map value)=>ficWriteReadCache('payroll',value);
+  Future<void> load({String? month}) async {
+    if(mounted)setState((){loading=true;error=null;});
+    final cache=await _readCache(); cacheUpdatedAt=await ficReadCacheUpdatedAt('payroll');
+    if(ficOfflineMode){
+      if(cache!=null){data=cache;selectedMonth='${data['selected_month']??month??''}'.trim();showingOffline=true;error=null;}
+      else{error='Chưa có bảng lương offline. Hãy mở Bảng lương khi có internet ít nhất một lần để tải dữ liệu.';}
+      if(mounted)setState(()=>loading=false);return;
+    }
+    try{
+      final suffix=(month!=null&&month.isNotEmpty)?'?month=${Uri.encodeQueryComponent(month)}':'';
+      final r=await api.get('/payroll$suffix');data=(r['data'] is Map)?Map.from(r['data']):Map.from(r);selectedMonth='${data['selected_month']??month??''}'.trim();showingOffline=false;await _writeCache(data);cacheUpdatedAt=await ficReadCacheUpdatedAt('payroll');
+    }catch(e){
+      if(cache!=null){data=cache;selectedMonth='${data['selected_month']??month??''}'.trim();showingOffline=true;error=null;}
+      else{error=e.toString().replaceFirst('Exception: ','');}
+    }finally{if(mounted)setState(()=>loading=false);}
+  }
+  num n(Map m,List<String> keys){for(final k in keys){if(m[k]!=null){final v=num.tryParse('${m[k]}');if(v!=null)return v;}}return 0;}
+  String t(Map m,List<String> keys){for(final k in keys){final v='${m[k]??''}'.trim();if(v.isNotEmpty)return v;}return '';}
+  Widget moneyRow(String label,num value,{bool strong=false,String prefix=''})=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[Expanded(child:Text(label)),Text('$prefix${money(value)} đ',style:TextStyle(fontWeight:strong?FontWeight.w900:FontWeight.w600))]));
+  String hoursText(num v)=>v.toStringAsFixed(v%1==0?0:2).replaceAll('.', ',');
+  Map<String,dynamic> get payroll {final raw=data['payroll']??data['latest'];return raw is Map?Map<String,dynamic>.from(raw):<String,dynamic>{};}
+  Map<String,dynamic> get summary {final x=data['summary'];return x is Map?Map<String,dynamic>.from(x):<String,dynamic>{};}
+  Future<void> downloadPdf() async {
+    final m=payroll;if(m.isEmpty||pdfBusy)return;setState(()=>pdfBusy=true);
+    try{
+      final extras=List.from(data['extras'] as List? ?? const []);final sm=summary;
+      final base=n(sm,['base_salary']);final gross=n(sm,['gross_salary']);final extraTotal=n(sm,['extra_total']);
+      final advanced=n(sm,['advanced']);final paid=n(sm,['paid']);final remaining=n(sm,['remaining']);
+      final allowance=n(m,['phucap']);final bonus=n(m,['thuong']);final fine=n(m,['tienphat']);final hours=n(m,['tongsogiolam','tonggiolam','tong_gio_lam']);
+      final employee='${data['employee_name']??''}'.trim();final role='${data['role_name']??''}'.trim();final salaryType='${data['salary_type']??''}'.trim();final configured=num.tryParse('${data['configured_salary']??0}')??0;final unit='${data['configured_salary_unit']??''}';final month=selectedMonth??'';
+      final doc=pw.Document();
+      pw.Widget row(String a,String b,{bool bold=false})=>pw.Padding(padding:const pw.EdgeInsets.symmetric(vertical:4),child:pw.Row(children:[pw.Expanded(child:pw.Text(a,style:bold?pw.TextStyle(fontWeight:pw.FontWeight.bold):null)),pw.Text(b,style:bold?pw.TextStyle(fontWeight:pw.FontWeight.bold):null)]));
+      doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,margin:const pw.EdgeInsets.all(32),build:(_)=>[
+        pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Text('FIC POS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:14)),pw.Text('PHIEU LUONG',style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:22)),pw.Text('Thang ${month.replaceFirst('-', '/')}')]),pw.Text('DA CHOT',style:pw.TextStyle(fontWeight:pw.FontWeight.bold))]),pw.SizedBox(height:16),
+        pw.Table(border:pw.TableBorder.all(),children:[pw.TableRow(children:[pw.Padding(padding:const pw.EdgeInsets.all(8),child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Text('Nhan vien'),pw.Text(employee,style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text('Chuc vu: $role')])),pw.Padding(padding:const pw.EdgeInsets.all(8),child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Text('Hinh thuc luong'),pw.Text(salaryType,style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text('Muc luong: ${money(configured)} d$unit')]))])]),pw.SizedBox(height:14),
+        row('Tong gio lam','${hoursText(hours)} gio'),row('Tong thu nhap','${money(gross)} d',bold:true),row('Da ung + da tra','${money(advanced+paid)} d'),row('Con phai tra','${money(remaining)} d',bold:true),pw.Divider(),pw.Text('CHI TIET TINH LUONG',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),row('Luong theo cong/gio da chot','${money(base)} d'),row('Phu cap','+ ${money(allowance)} d'),row('Thuong','+ ${money(bonus)} d'),row('Khoan them','+ ${money(extraTotal)} d'),row('Tien phat','- ${money(fine)} d'),row('Tong thu nhap sau cong/tru','${money(gross)} d',bold:true),row('Tien da ung','- ${money(advanced)} d'),row('Tien da thanh toan','- ${money(paid)} d'),row('LUONG CON LAI PHAI TRA','${money(remaining)} d',bold:true),
+        if(extras.isNotEmpty)...[pw.SizedBox(height:14),pw.Text('CHI TIET KHOAN THEM',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),...extras.map((x){final e=x is Map?x:<String,dynamic>{};return row('${e['noidung']??'Khoan them'}','${money(num.tryParse('${e['sotien']??0}')??0)} d');})],pw.SizedBox(height:42),pw.Row(children:[pw.Expanded(child:pw.Center(child:pw.Text('Nguoi nhan\n(Ky va ghi ro ho ten)',textAlign:pw.TextAlign.center))),pw.Expanded(child:pw.Center(child:pw.Text('Nguoi lap bang luong\n(Ky va ghi ro ho ten)',textAlign:pw.TextAlign.center)))])
+      ]));
+      final safeMonth=month.replaceAll('/','-');await Printing.layoutPdf(onLayout:(_)=>doc.save(),name:'Bang-luong-$safeMonth.pdf');
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));}
+    finally{if(mounted)setState(()=>pdfBusy=false);}
+  }
+  @override Widget build(BuildContext context){
+    final months=List.from(data['months'] as List? ?? const []).map((e)=>'$e').toList();final m=payroll;final sm=summary;final extras=List.from(data['extras'] as List? ?? const []);
+    final hours=n(m,['tongsogiolam','tonggiolam','tong_gio_lam']);final base=n(sm,['base_salary']);final gross=n(sm,['gross_salary']);final extraTotal=n(sm,['extra_total']);final advanced=n(sm,['advanced']);final paid=n(sm,['paid']);final remaining=n(sm,['remaining']);final allowance=n(m,['phucap']);final bonus=n(m,['thuong']);final fine=n(m,['tienphat']);
+    return Scaffold(appBar:AppBar(title:const Text('Bảng lương của tôi'),actions:[if(m.isNotEmpty)IconButton(tooltip:'Tải PDF',onPressed:pdfBusy?null:downloadPdf,icon:pdfBusy?const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.picture_as_pdf_outlined)),IconButton(onPressed:()=>load(month:selectedMonth),icon:const Icon(Icons.refresh))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(error!,textAlign:TextAlign.center),const SizedBox(height:12),FilledButton(onPressed:()=>load(month:selectedMonth),child:const Text('Thử lại'))]))):RefreshIndicator(onRefresh:()=>load(month:selectedMonth),child:ListView(padding:const EdgeInsets.all(14),children:[
+      if(showingOffline) ficOfflineReadNotice(cacheUpdatedAt),
+      if(months.isNotEmpty)DropdownButtonFormField<String>(value:(selectedMonth!=null&&months.contains(selectedMonth))?selectedMonth:months.first,decoration:const InputDecoration(labelText:'Chọn tháng lương',prefixIcon:Icon(Icons.calendar_month_outlined)),items:months.map((x)=>DropdownMenuItem(value:x,child:Text('Tháng ${x.replaceFirst('-', '/')}'))).toList(),onChanged:(x){if(x!=null)load(month:x);}),if(months.isNotEmpty)const SizedBox(height:12),if(m.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(22),child:Text('Chưa có bảng lương được chốt và mở cho bạn.'))),
+      if(m.isNotEmpty)...[Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Row(children:[const Expanded(child:Text('PHIẾU LƯƠNG',style:TextStyle(fontSize:20,fontWeight:FontWeight.w900))),Chip(label:const Text('Đã chốt'))]),Text('Tháng ${(selectedMonth??'').replaceFirst('-', '/')}',style:const TextStyle(color:Colors.black54)),const Divider(height:24),Text('${data['employee_name']??''}',style:const TextStyle(fontSize:18,fontWeight:FontWeight.w800)),Text('Chức vụ: ${data['role_name']??''}'),const SizedBox(height:12),Text('${data['salary_type']??''}',style:const TextStyle(fontWeight:FontWeight.w700)),Text('Mức lương cấu hình: ${money(num.tryParse('${data['configured_salary']??0}')??0)} đ${data['configured_salary_unit']??''}'),const Divider(height:24),Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Row(children:[const Expanded(child:Text('Tổng giờ làm')),Text('${hoursText(hours)} giờ',style:const TextStyle(fontWeight:FontWeight.w700))])),moneyRow('Tổng thu nhập',gross,strong:true),moneyRow('Đã ứng + đã trả',advanced+paid),moneyRow('Còn phải trả',remaining,strong:true),const SizedBox(height:12),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:pdfBusy?null:downloadPdf,icon:const Icon(Icons.picture_as_pdf_outlined),label:Text(pdfBusy?'Đang tạo PDF...':'Tải PDF')))]))),
+      Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Chi tiết tính lương',style:TextStyle(fontSize:17,fontWeight:FontWeight.w900)),const Divider(),moneyRow('Lương theo công/giờ đã chốt',base),moneyRow('Phụ cấp',allowance,prefix:'+ '),moneyRow('Thưởng',bonus,prefix:'+ '),moneyRow('Khoản thêm',extraTotal,prefix:'+ '),moneyRow('Tiền phạt',fine,prefix:'- '),const Divider(),moneyRow('Tổng thu nhập sau cộng/trừ',gross,strong:true),moneyRow('Tiền đã ứng',advanced,prefix:'- '),moneyRow('Tiền đã thanh toán',paid,prefix:'- '),const Divider(),moneyRow('LƯƠNG CÒN LẠI PHẢI TRẢ',remaining,strong:true)]))),
+      if(extras.isNotEmpty)Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Chi tiết khoản thêm',style:TextStyle(fontSize:17,fontWeight:FontWeight.w900)),const Divider(),...extras.map((x){final e=x is Map?x:<String,dynamic>{};return Column(children:[moneyRow('${e['noidung']??'Khoản thêm'}',num.tryParse('${e['sotien']??0}')??0),if('${e['thoigian']??''}'.isNotEmpty)Align(alignment:Alignment.centerLeft,child:Text('${e['thoigian']}',style:const TextStyle(fontSize:12,color:Colors.black54)))]);})]))),
+      const SizedBox(height:18),const Row(children:[Expanded(child:Column(children:[Text('Người nhận',style:TextStyle(fontWeight:FontWeight.w700)),Text('(Ký và ghi rõ họ tên)',style:TextStyle(fontSize:12,color:Colors.black54))])),Expanded(child:Column(children:[Text('Người lập bảng lương',style:TextStyle(fontWeight:FontWeight.w700)),Text('(Ký và ghi rõ họ tên)',style:TextStyle(fontSize:12,color:Colors.black54))]))]),const SizedBox(height:30)]
+    ])));
   }
 }
 
@@ -7194,7 +7478,7 @@ class _NativeModulePageState extends State<NativeModulePage> {
   };
   @override void initState(){super.initState();load();}
   String _pageUrl(String ep,int p)=>'$ep${ep.contains('?')?'&':'?'}page=$p&per_page=20';
-  Future<void> load() async { setState((){loading=true;page=1;hasMore=false;}); try { final ep=endpoints[widget.module]; if(ep==null){data={'message': widget.module=='settings'?'Thiết lập ứng dụng được lưu trên thiết bị.':'Báo cáo cuối ngày dùng dữ liệu Ca & két và hóa đơn.'};} else {final r=await api.get(_pageUrl(ep,1)); data=r['data']??r;final d=data is Map?data as Map:{};hasMore=d['has_more']==true||((d['pagination'] as Map?)?['has_more']==true);} error=null;} catch(e){error=e.toString().replaceFirst('Exception: ','');} if(mounted)setState(()=>loading=false); }
+  Future<void> load() async { setState((){loading=true;page=1;hasMore=false;}); try { final ep=endpoints[widget.module]; if(ep==null){data={'message': widget.module=='settings'?'Thiết lập ứng dụng được lưu trên thiết bị.':'Báo cáo cuối ngày dùng dữ liệu Ca & két và hóa đơn.'};} else if(widget.module=='violations'){if(ficOfflineMode){final cached=await ficReadReadCache('violations');if(cached==null)throw Exception('Chưa có dữ liệu Vi phạm offline. Hãy mở mục này khi có Internet một lần.');data=cached;}else{final r=await api.get(_pageUrl(ep,1));data=r['data']??r;if(data is Map)await ficWriteReadCache('violations',Map.from(data as Map));}final d=data is Map?data as Map:{};hasMore=d['has_more']==true||((d['pagination'] as Map?)?['has_more']==true);} else {final r=await api.get(_pageUrl(ep,1)); data=r['data']??r;final d=data is Map?data as Map:{};hasMore=d['has_more']==true||((d['pagination'] as Map?)?['has_more']==true);} error=null;} catch(e){if(widget.module=='violations'&&_isNetworkError(e)){ficOfflineMode=true;final cached=await ficReadReadCache('violations');if(cached!=null){data=cached;error=null;}else{error='Chưa có dữ liệu Vi phạm offline. Hãy kết nối Internet một lần để tải dữ liệu.';}}else{error=e.toString().replaceFirst('Exception: ','');}} if(mounted)setState(()=>loading=false); }
   Future<void> loadMore() async {if(loadingMore||!hasMore)return;final ep=endpoints[widget.module];if(ep==null)return;setState(()=>loadingMore=true);try{final next=page+1;final r=await api.get(_pageUrl(ep,next));final d=r['data']??r;final current=_rows(data);final more=_rows(d);if(data is Map && d is Map){final mm=Map<String,dynamic>.from(data as Map);if(mm['items'] is List)mm['items']=[...current,...more];else if(mm['requests'] is List)mm['requests']=[...current,...more];else{for(final k in ['entries','customers','purchases','products','stocktakes','schedule','registrations']){if(mm[k] is List){mm[k]=[...current,...more];break;}}}mm['has_more']=d['has_more'];mm['pagination']=d['pagination'];data=mm;}else{data=[...current,...more];}page=next;final dm=d is Map?d as Map:{};hasMore=dm['has_more']==true||((dm['pagination'] as Map?)?['has_more']==true);}catch(e){toast(e.toString().replaceFirst('Exception: ',''));}finally{if(mounted)setState(()=>loadingMore=false);}}
   void toast(String x)=>ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(x)));
   List _rows(dynamic x){ if(x is List)return x; if(x is Map){ for(final k in ['entries','customers','purchases','products','stocktakes','schedule','registrations','items']){if(x[k] is List)return x[k] as List;} final lists=x.values.whereType<List>(); if(lists.isNotEmpty)return lists.first;} return const []; }
@@ -7210,7 +7494,13 @@ class _NativeModulePageState extends State<NativeModulePage> {
   }
   Future<List<String>?> _twoFields(String title,String a,String b) async {final c1=TextEditingController(),c2=TextEditingController();return showDialog<List<String>>(context:context,builder:(dc)=>AlertDialog(title:Text(title),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:c1,decoration:InputDecoration(labelText:a)),TextField(controller:c2,decoration:InputDecoration(labelText:b))]),actions:[TextButton(onPressed:()=>Navigator.pop(dc),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(dc,[c1.text.trim(),c2.text.trim()]),child:const Text('Lưu'))]));}
   List<Widget> actions(){switch(widget.module){case'attendance':return[FilledButton.icon(onPressed:()=>action('checkin'),icon:const Icon(Icons.login),label:const Text('Vào ca')),OutlinedButton.icon(onPressed:()=>action('checkout'),icon:const Icon(Icons.logout),label:const Text('Ra ca'))];case'inventory':return[FilledButton.icon(onPressed:()=>action('stocktake'),icon:const Icon(Icons.add_task),label:const Text('Tạo phiếu kiểm kho'))];case'ingredients':return[FilledButton.icon(onPressed:()=>action('ingredient'),icon:const Icon(Icons.add_alert),label:const Text('Báo nguyên liệu'))];case'salary_advance':return[FilledButton.icon(onPressed:()=>action('advance'),icon:const Icon(Icons.request_quote),label:const Text('Tạo yêu cầu ứng lương'))];case'cashbook':return[FilledButton.icon(onPressed:()=>action('cash'),icon:const Icon(Icons.add),label:const Text('Tạo thu / chi'))];default:return[];}}
-  @override Widget build(BuildContext context){final rows=_rows(data);return Scaffold(appBar:AppBar(title:Text(labels[widget.module]??'FIC POS'),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Text(error!))):RefreshIndicator(onRefresh:load,child:NotificationListener<ScrollNotification>(onNotification:(n){if(n.metrics.pixels>=n.metrics.maxScrollExtent-240)loadMore();return false;},child:ListView(padding:const EdgeInsets.all(14),children:[if(actions().isNotEmpty)Wrap(spacing:8,runSpacing:8,children:actions()),if(actions().isNotEmpty)const SizedBox(height:12),if(rows.isEmpty)Card(child:Padding(padding:const EdgeInsets.all(22),child:Text(data is Map&&data['message']!=null?'${data['message']}':'Chưa có dữ liệu.'))),...rows.map((e){final m=e is Map?e:<String,dynamic>{'value':e};final isPurchaseReturn=widget.module=='purchase_returns';final sub=isPurchaseReturn?'${m['ncc']??''}${('${m['ma_phieunhap']??''}').trim().isNotEmpty?' • Phiếu nhập ${m['ma_phieunhap']}':''}${('${m['ngaytra']??''}').trim().isNotEmpty?' • ${m['ngaytra']}':''}':(m['id']!=null?'ID: ${m['id']}':null);return Card(child:ListTile(title:Text(isPurchaseReturn?('${m['ma']??('Phiếu trả #${m['id']??''}')} • ${money(num.tryParse('${m['tongtien']}')??0)} đ'):(summary(m).isEmpty?'#${m['id']??''}':summary(m))),subtitle:sub==null?null:Text(sub),trailing:isPurchaseReturn?const Icon(Icons.chevron_right):null,onTap:isPurchaseReturn?()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>PurchaseReturnDetailPage(initial:m))):null));}),if(loadingMore)const Padding(padding:EdgeInsets.all(16),child:Center(child:CircularProgressIndicator(strokeWidth:2)))]))));}
+  String _vText(dynamic v)=>v==null?'':'$v';
+  num _vNum(dynamic v)=>v is num?v:(num.tryParse('$v')??0);
+  String _violationName(Map m){final l=m['loivipham'];if(l is Map){for(final k in ['loivipham','ten','name']){if(_vText(l[k]).trim().isNotEmpty)return _vText(l[k]);}}return _vText(m['ten_loi']).trim().isNotEmpty?_vText(m['ten_loi']):'Vi phạm';}
+  Future<void> _violationDetail(Map m) async {try{final id=m['id'];if(id==null)return;dynamic d;if(ficOfflineMode){d=await ficReadReadCache('violation_detail_$id');if(d==null)throw Exception('Chi tiết vi phạm này chưa được lưu offline. Hãy mở chi tiết khi có Internet một lần.');}else{final r=await api.get('/violations/$id');d=r['data']??r;if(d is Map)await ficWriteReadCache('violation_detail_$id',Map.from(d as Map));}final rows=d is List?d:((d is Map&&d['items'] is List)?d['items'] as List:const []);if(!mounted)return;await showModalBottomSheet(context:context,isScrollControlled:true,builder:(c)=>SafeArea(child:Padding(padding:const EdgeInsets.all(18),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[Row(children:[Expanded(child:Text(_violationName(m),style:const TextStyle(fontSize:20,fontWeight:FontWeight.w900))),IconButton(onPressed:()=>Navigator.pop(c),icon:const Icon(Icons.close))]),const SizedBox(height:8),if(rows.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:18),child:Text('Chưa có chi tiết vi phạm.')),...rows.map((e){final x=e is Map?e:<String,dynamic>{};return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Lần ${_vText(x['lanthu']).isEmpty?'—':x['lanthu']}',style:const TextStyle(fontWeight:FontWeight.w800)),if(_vText(x['thoigianvipham']).isNotEmpty)Text('Thời gian: ${x['thoigianvipham']}'),Text('Điểm bị trừ: ${_vNum(x['sodiembitru']).toStringAsFixed(0)} điểm'),Text('Tiền bị trừ: ${money(_vNum(x['sotienbitru']))} đ')])));}),const SizedBox(height:8)]))));}catch(e){toast(e.toString().replaceFirst('Exception: ',''));}}
+  Widget _buildViolations(){final d=data is Map?data as Map:<String,dynamic>{};final emp=d['employee'] is Map?d['employee'] as Map:<String,dynamic>{};final rows=d['violations'] is List?d['violations'] as List:const [];final types=d['types'] is List?d['types'] as List:const [];final policy=d['policy'] is Map?d['policy'] as Map:<String,dynamic>{};final userName=_vText(d['user_name']);final pool=_vNum(policy['quy_diem_thang']);final exhaustedFine=_vNum(policy['tien_phat_het_diem']);return Scaffold(appBar:AppBar(title:const Text('Vi phạm'),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Text(error!))):RefreshIndicator(onRefresh:load,child:ListView(padding:const EdgeInsets.all(14),children:[if(ficOfflineMode)FutureBuilder<String?>(future:ficReadCacheUpdatedAt('violations'),builder:(_,snap)=>ficOfflineReadNotice(snap.data)),Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Thông tin vi phạm',style:TextStyle(fontSize:20,fontWeight:FontWeight.w900)),if(userName.isNotEmpty)...[const SizedBox(height:4),Text(userName,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w800))],const SizedBox(height:14),Row(children:[Expanded(child:_violationStat('Điểm còn lại','${_vNum(emp['Diem']).toStringAsFixed(0)} điểm',Icons.stars_outlined)),const SizedBox(width:10),Expanded(child:_violationStat('Số tiền bị trừ','${money(_vNum(emp['tien_phat']))} đ',Icons.payments_outlined))]),if(pool>0)...[const SizedBox(height:12),Text('Quỹ điểm tháng hiện tại: ${pool.toStringAsFixed(0)} điểm. Khi dùng hết quỹ, tiền phạt cấu hình là ${money(exhaustedFine)} đ và quỹ điểm được cấp lại theo cấu hình cửa hàng.',style:const TextStyle(fontSize:12.5,color:Colors.black54))]]))),if(types.isNotEmpty)...[const SizedBox(height:12),ExpansionTile(tilePadding:const EdgeInsets.symmetric(horizontal:12),childrenPadding:const EdgeInsets.fromLTRB(12,0,12,12),title:const Text('Mức phạt vi phạm',style:TextStyle(fontWeight:FontWeight.w800)),children:types.map((e){final t=e is Map?e:<String,dynamic>{};return ListTile(dense:true,contentPadding:EdgeInsets.zero,title:Text(_vText(t['loivipham']).isEmpty?'Loại vi phạm':_vText(t['loivipham'])),subtitle:Text('Trừ ${_vNum(t['effective_diemtru']).toStringAsFixed(0)} điểm • ${money(_vNum(t['effective_tientru']))} đ'));}).toList())],const SizedBox(height:14),const Text('Danh sách vi phạm',style:TextStyle(fontSize:20,fontWeight:FontWeight.w900)),const SizedBox(height:6),if(rows.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(18),child:Text('Bạn không có vi phạm.'))),...rows.map((e){final x=e is Map?e:<String,dynamic>{};return Card(child:ListTile(title:Text(_violationName(x),style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text('Lần cuối: ${_vText(x['thoigian']).isEmpty?'—':x['thoigian']}\nSố lần: ${_vText(x['lanthu']).isEmpty?'0':x['lanthu']}'),isThreeLine:true,trailing:const Icon(Icons.chevron_right),onTap:()=>_violationDetail(x)));})])));}
+  Widget _violationStat(String label,String value,IconData icon)=>Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(border:Border.all(color:Colors.black12),borderRadius:BorderRadius.circular(12)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon,size:20),const SizedBox(height:8),Text(label,style:const TextStyle(fontSize:12,color:Colors.black54)),const SizedBox(height:2),Text(value,style:const TextStyle(fontWeight:FontWeight.w900,fontSize:16))]));
+  @override Widget build(BuildContext context){if(widget.module=='violations')return _buildViolations();final rows=_rows(data);return Scaffold(appBar:AppBar(title:Text(labels[widget.module]??'FIC POS'),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Text(error!))):RefreshIndicator(onRefresh:load,child:NotificationListener<ScrollNotification>(onNotification:(n){if(n.metrics.pixels>=n.metrics.maxScrollExtent-240)loadMore();return false;},child:ListView(padding:const EdgeInsets.all(14),children:[if(actions().isNotEmpty)Wrap(spacing:8,runSpacing:8,children:actions()),if(actions().isNotEmpty)const SizedBox(height:12),if(rows.isEmpty)Card(child:Padding(padding:const EdgeInsets.all(22),child:Text(data is Map&&data['message']!=null?'${data['message']}':'Chưa có dữ liệu.'))),...rows.map((e){final m=e is Map?e:<String,dynamic>{'value':e};final isPurchaseReturn=widget.module=='purchase_returns';final sub=isPurchaseReturn?'${m['ncc']??''}${('${m['ma_phieunhap']??''}').trim().isNotEmpty?' • Phiếu nhập ${m['ma_phieunhap']}':''}${('${m['ngaytra']??''}').trim().isNotEmpty?' • ${m['ngaytra']}':''}':(m['id']!=null?'ID: ${m['id']}':null);return Card(child:ListTile(title:Text(isPurchaseReturn?('${m['ma']??('Phiếu trả #${m['id']??''}')} • ${money(num.tryParse('${m['tongtien']}')??0)} đ'):(summary(m).isEmpty?'#${m['id']??''}':summary(m))),subtitle:sub==null?null:Text(sub),trailing:isPurchaseReturn?const Icon(Icons.chevron_right):null,onTap:isPurchaseReturn?()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>PurchaseReturnDetailPage(initial:m))):null));}),if(loadingMore)const Padding(padding:EdgeInsets.all(16),child:Center(child:CircularProgressIndicator(strokeWidth:2)))]))));}
 }
 
 
@@ -7421,7 +7711,7 @@ class NativePrintPage extends StatelessWidget {
       : ((root['order'] as Map?) ?? {});
   Map get payment => ((root['payment'] as Map?) ?? {});
   Map get printInfo => kind == 'temporary'
-      ? ((bill['print'] as Map?) ?? {})
+      ? ((root['print'] as Map?) ?? (bill['print'] as Map?) ?? {})
       : ((root['print'] as Map?) ?? {});
   Map get bank => ((printInfo['bank'] as Map?) ?? {});
   Map get template => ((printInfo['template'] as Map?) ?? {});
@@ -7479,6 +7769,33 @@ class NativePrintPage extends StatelessWidget {
     return null;
   }
 
+  String get logoUrl {
+    for (final v in [printInfo['logo_url'], printInfo['store_logo_url'], printInfo['logo'], printInfo['store_logo']]) {
+      final x=text(v).trim(); if(x.isNotEmpty) return x;
+    }
+    return '';
+  }
+
+  Widget logoWidget() {
+    final u=logoUrl; if(u.isEmpty) return const SizedBox.shrink();
+    if(u.startsWith('data:image')) {
+      try { return Center(child:Image.memory(base64Decode(u.substring(u.indexOf(',')+1)),height:58,fit:BoxFit.contain)); } catch(_) { return const SizedBox.shrink(); }
+    }
+    final absolute=u.startsWith('http://')||u.startsWith('https://')?u:'${api.baseUrl}${u.startsWith('/')?'':'/'}$u';
+    return Center(child:Image.network(absolute,headers:api.imageHeaders,height:58,fit:BoxFit.contain,errorBuilder:(_,__,___)=>const SizedBox.shrink()));
+  }
+
+  Future<Uint8List?> logoBytes() async {
+    final u=logoUrl; if(u.isEmpty) return null;
+    try {
+      if(u.startsWith('data:image')) return base64Decode(u.substring(u.indexOf(',')+1));
+      final absolute=u.startsWith('http://')||u.startsWith('https://')?u:'${api.baseUrl}${u.startsWith('/')?'':'/'}$u';
+      final r=await http.get(Uri.parse(absolute),headers:api.imageHeaders).timeout(const Duration(seconds:6));
+      if(r.statusCode>=200&&r.statusCode<300&&r.bodyBytes.isNotEmpty)return r.bodyBytes;
+    } catch(_) {}
+    return null;
+  }
+
   Widget line(String a, String b, {bool strong = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -7504,7 +7821,7 @@ class NativePrintPage extends StatelessWidget {
     final subtotal = n(order['tongtien'] ?? payment['tongtien']);
     final discount = n(order['giamgia'] ?? payment['giamgia']);
     final due = n(order['phaitra'] ?? payment['phaitra']);
-    final storeName = text(printInfo['store_name']).trim().isEmpty ? 'FIC POS' : text(printInfo['store_name']).trim();
+    final storeName = text(printInfo['store_name']).trim();
     final branchName = text(printInfo['branch_name']).trim();
     final address = text(printInfo['address']).trim();
     final phone = text(printInfo['phone']).trim();
@@ -7531,6 +7848,7 @@ class NativePrintPage extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (kind != 'temporary' || tempFlag('temp_show_logo')) ...[logoWidget(), const SizedBox(height: 6)],
           Center(child: Text(storeName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900))),
           if (branchName.isNotEmpty) Center(child: Text(branchName, style: const TextStyle(fontWeight: FontWeight.w700))),
           if (address.isNotEmpty) Center(child: Text(address, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black54))),
@@ -7583,7 +7901,8 @@ class NativePrintPage extends StatelessWidget {
     final due = n(order['phaitra'] ?? payment['phaitra']);
     final localQr=localQrPayload(due);
     final qr = localQr.isEmpty ? await qrBytes() : null;
-    final storeName = text(printInfo['store_name']).trim().isEmpty ? 'FIC POS' : text(printInfo['store_name']).trim();
+    final logo = await logoBytes();
+    final storeName = text(printInfo['store_name']).trim();
     final branchName = text(printInfo['branch_name']).trim();
     final address = text(printInfo['address']).trim();
     final phone = text(printInfo['phone']).trim();
@@ -7602,6 +7921,7 @@ class NativePrintPage extends StatelessWidget {
         build: (_) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
+            if (logo != null && (kind != 'temporary' || tempFlag('temp_show_logo'))) ...[pw.Center(child:pw.Image(pw.MemoryImage(logo),height:16*PdfPageFormat.mm,fit:pw.BoxFit.contain)),pw.SizedBox(height:2)],
             pw.Center(child: pw.Text(storeName, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
             if (branchName.isNotEmpty) pw.Center(child: pw.Text(branchName, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
             if (address.isNotEmpty) pw.Center(child: pw.Text(address, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
@@ -8613,6 +8933,33 @@ class _PaymentRequestsPageState extends State<PaymentRequestsPage> {
 }
 
 
+class NotificationPreferencePage extends StatefulWidget {
+  const NotificationPreferencePage({super.key});
+  @override State<NotificationPreferencePage> createState()=>_NotificationPreferencePageState();
+}
+
+class _NotificationPreferencePageState extends State<NotificationPreferencePage> {
+  bool loading=true; String? error; List<Map<String,dynamic>> items=[]; final Set<String> saving={};
+  @override void initState(){super.initState();load();}
+  Future<void> load() async {
+    setState((){loading=true;error=null;});
+    try{final r=await api.get('/notification-preferences');items=((r['items'] as List?)??const []).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();}
+    catch(e){error=e.toString().replaceFirst('Exception: ','');}
+    finally{if(mounted)setState(()=>loading=false);}
+  }
+  Future<void> toggle(Map<String,dynamic> x,bool value) async {
+    final type='${x['type']??''}'; if(type.isEmpty||saving.contains(type))return;
+    final old=x['enabled']==true; setState((){x['enabled']=value;saving.add(type);});
+    try{await api.post('/notification-preferences',{'type':type,'enabled':value});}
+    catch(e){if(mounted){setState(()=>x['enabled']=old);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString().replaceFirst('Exception: ',''))));}}
+    finally{if(mounted)setState(()=>saving.remove(type));}
+  }
+  @override Widget build(BuildContext context){
+    final groups=<String,List<Map<String,dynamic>>>{}; for(final x in items){groups.putIfAbsent('${x['group']??'Thông báo'}',()=>[]).add(x);}
+    return Scaffold(appBar:AppBar(title:const Text('Cài đặt thông báo'),actions:[IconButton(onPressed:loading?null:load,icon:const Icon(Icons.refresh))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(error!,textAlign:TextAlign.center),const SizedBox(height:12),FilledButton(onPressed:load,child:const Text('Thử lại'))]))):items.isEmpty?const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Tài khoản hiện không có loại thông báo nào để cài đặt.',textAlign:TextAlign.center))):ListView(padding:const EdgeInsets.fromLTRB(14,12,14,24),children:[const Card(child:Padding(padding:EdgeInsets.all(14),child:Text('Chỉ áp dụng cho tài khoản này trên Mobile. Cài đặt của cửa hàng và quyền nhận thông báo trên Web không thay đổi.'))),const SizedBox(height:8),...groups.entries.expand((g)=>[Padding(padding:const EdgeInsets.fromLTRB(6,14,6,6),child:Text(g.key.toUpperCase(),style:const TextStyle(fontSize:12,fontWeight:FontWeight.w800,color:Colors.black54))),Card(child:Column(children:g.value.map((x)=>SwitchListTile(title:Text('${x['label']??x['type']}'),value:x['enabled']==true,onChanged:saving.contains('${x['type']}')?null:(v)=>toggle(x,v),secondary:saving.contains('${x['type']}')?const SizedBox(width:22,height:22,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.notifications_outlined))).toList()))]) ]));
+  }
+}
+
 class NotificationCenterPage extends StatefulWidget {
   const NotificationCenterPage({super.key});
   @override
@@ -8713,6 +9060,22 @@ class _NotificationCenterPageState extends State<NotificationCenterPage> {
       final type = '${x['ref_type'] ?? ''}';
       if (type == 'qr_order') {
         if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const QrRequestPage()));
+      } else if (type.contains('salary_advance') || type.contains('advance')) {
+        // Notification Center must navigate inside the app. action_url may be a web URL
+        // and must never be opened as /api/mobile/v1/... in an external browser.
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const SalaryAdvancePage()));
+      } else if (type.contains('payroll') || type.contains('salary_opened') || type.contains('salary_final')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const PayrollPage()));
+      } else if (type.contains('schedule') || type.contains('shift_registration')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkSchedulePage()));
+      } else if (type.contains('late') || type.contains('leave') || type.contains('early_leave')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const LateRequestPage()));
+      } else if (type.contains('attendance')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendancePage()));
+      } else if (type.contains('task')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const TasksPage()));
+      } else if (type.contains('violation')) {
+        if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => const NativeModulePage(module:'violations')));
       } else if (type == 'payment_request') {
         final tableId = int.tryParse('${x['id_ban'] ?? 0}') ?? 0;
         final code = '${x['madonhang'] ?? ''}'.trim();
