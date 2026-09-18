@@ -46,7 +46,7 @@ const int ficPosMobileBuild = 94; // FIC FORCE UPDATE: build TEST hiện tại
 // Mat mang / API loi => KHONG khoa app de Offline Mode van hoat dong.
 // ============================================================
 Future<void> ficCheckAppUpdate(BuildContext context) async {
-  if (ficOfflineMode || api.baseUrl.isEmpty) return;
+  if (api.baseUrl.isEmpty) return;
   try {
     final result = await api.get('/app-version', timeout: const Duration(seconds: 5));
     if (!context.mounted) return;
@@ -689,10 +689,13 @@ class _AppState extends State<FicPosApp> {
   bool _updateChecked = false;
 
   void _checkUpdateAfterFrame() {
-    if (_updateChecked || ficOfflineMode) return;
-    _updateChecked = true;
+    if (_updateChecked || api.baseUrl.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ficCheckAppUpdate(context);
+      if (!mounted || _updateChecked) return;
+      final updateContext = _navigatorKey.currentState?.overlay?.context;
+      if (updateContext == null) return;
+      _updateChecked = true;
+      ficCheckAppUpdate(updateContext);
     });
   }
 
