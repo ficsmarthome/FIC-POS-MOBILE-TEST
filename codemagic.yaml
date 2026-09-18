@@ -48,3 +48,89 @@ workflows:
 
     artifacts:
       - build/ios/iphonesimulator/Runner.app/**
+
+  fic-pos-ios-app-store:
+    name: FIC POS TEST iOS App Store
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+
+    integrations:
+      app_store_connect: FIC POS Apple
+
+    environment:
+      groups:
+        - fic_ios
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.ficpos.app.test
+
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Prepare iOS project
+        script: |
+          chmod +x tool/prepare_ios.sh
+          ./tool/prepare_ios.sh
+
+      - name: Install CocoaPods
+        script: |
+          find ios -name "Podfile" -execdir pod install \;
+
+      - name: Configure iOS code signing
+        script: |
+          xcode-project use-profiles
+
+      - name: Validate iOS property lists
+        script: |
+          set -e
+
+          echo "=== Validate Info.plist ==="
+          plutil -lint ios/Runner/Info.plist
+
+          echo "=== Validate Apple privacy purpose strings ==="
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :NSSpeechRecognitionUsageDescription" ios/Runner/Info.plist
+
+          echo "=== Validate Runner.entitlements ==="
+          plutil -lint ios/Runner/Runner.entitlements
+
+          echo "=== Validate GoogleService-Info.plist ==="
+          if [ -f ios/Runner/GoogleService-Info.plist ]; then
+            plutil -lint ios/Runner/GoogleService-Info.plist
+          else
+            echo "[FIC] ERROR: ios/Runner/GoogleService-Info.plist not found"
+            exit 1
+          fi
+
+          echo "=== Validate export_options.plist ==="
+          if [ -f /Users/builder/export_options.plist ]; then
+            plutil -lint /Users/builder/export_options.plist
+          else
+            echo "[FIC] ERROR: /Users/builder/export_options.plist not found"
+            exit 1
+          fi
+
+          echo "=== All iOS property lists are valid ==="
+
+      - name: Build signed IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - build/ios/archive/*.xcarchive
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
