@@ -1,7 +1,7 @@
 name: fic_pos_mobile
 description: FIC POS Mobile client for Android and iOS
 publish_to: 'none'
-version: 1.13.33+92
+version: 1.13.33+94
 environment:
   sdk: '>=3.3.0 <4.0.0'
 dependencies:

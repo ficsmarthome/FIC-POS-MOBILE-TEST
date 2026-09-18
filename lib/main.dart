@@ -35,7 +35,96 @@ int maxInt(int a, int b) => a > b ? a : b;
 Map<String,dynamic> ficMapOrEmpty(dynamic value) => value is Map ? value.map((k,v)=>MapEntry('$k',v)) : <String,dynamic>{};
 
 // Version hiển thị tập trung tại một hằng số UI. Giữ đồng bộ với pubspec.yaml khi phát hành.
-const String ficPosMobileVersion = '1.13.50+108 TEST V10.5';
+const String ficPosMobileVersion = '1.13.33+94 TEST V10.5';
+const int ficPosMobileBuild = 94; // FIC FORCE UPDATE: build TEST hiện tại
+
+// ============================================================
+// FIC FORCE UPDATE - UPDATE THUONG / CUONG CHE UPDATE
+// Server: GET /api/mobile/v1/app-version
+// latest_build > build hien tai => co ban moi.
+// minimum_build > build hien tai => bat buoc cap nhat.
+// Mat mang / API loi => KHONG khoa app de Offline Mode van hoat dong.
+// ============================================================
+Future<void> ficCheckAppUpdate(BuildContext context) async {
+  if (ficOfflineMode || api.baseUrl.isEmpty) return;
+  try {
+    final result = await api.get('/app-version', timeout: const Duration(seconds: 5));
+    if (!context.mounted) return;
+    final raw = Platform.isIOS ? result['ios'] : result['android'];
+    if (raw is! Map) return;
+    final platformData = Map<String, dynamic>.from(raw);
+    final latestBuild = int.tryParse('${platformData['latest_build'] ?? 0}') ?? 0;
+    final minimumBuild = int.tryParse('${platformData['minimum_build'] ?? 0}') ?? 0;
+    if (latestBuild <= 0 || ficPosMobileBuild >= latestBuild) return;
+    final storeUrl = '${platformData['store_url'] ?? ''}'.trim();
+    final latestVersion = '${platformData['latest_version'] ?? ''}'.trim();
+    final message = '${platformData['message'] ?? result['message'] ?? 'FIC POS đã có phiên bản mới với các cải tiến và sửa lỗi.'}'.trim();
+    final forced = minimumBuild > 0 && ficPosMobileBuild < minimumBuild;
+
+    Future<void> openStore() async {
+      final uri = Uri.tryParse(storeUrl);
+      if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http')) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Chưa cấu hình đường dẫn cập nhật ứng dụng.')),
+          );
+        }
+        return;
+      }
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+
+    if (forced) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dc) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            icon: const Icon(Icons.system_update_alt, size: 52),
+            title: const Text('Yêu cầu cập nhật FIC POS'),
+            content: Text(
+              '$message\n\nPhiên bản hiện tại: $ficPosMobileVersion'
+              '${latestVersion.isNotEmpty ? '\nPhiên bản mới: $latestVersion' : ''}'
+              '\n\nVui lòng cập nhật để tiếp tục sử dụng.',
+            ),
+            actions: [
+              FilledButton.icon(
+                onPressed: openStore,
+                icon: const Icon(Icons.download),
+                label: const Text('CẬP NHẬT NGAY'),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dc) => AlertDialog(
+        icon: const Icon(Icons.new_releases_outlined, size: 52),
+        title: const Text('FIC POS có phiên bản mới'),
+        content: Text(
+          '$message\n\nPhiên bản hiện tại: $ficPosMobileVersion'
+          '${latestVersion.isNotEmpty ? '\nPhiên bản mới: $latestVersion' : ''}',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dc), child: const Text('ĐỂ SAU')),
+          FilledButton.icon(
+            onPressed: openStore,
+            icon: const Icon(Icons.download),
+            label: const Text('CẬP NHẬT'),
+          ),
+        ],
+      ),
+    );
+  } catch (e) {
+    debugPrint('[FIC UPDATE] Bo qua kiem tra version: $e');
+  }
+}
 
 // TEST ONLY: bypass TLS certificate errors only for *.test.ficpos.com.
 // Production ficpos.com remains subject to normal certificate validation.
@@ -597,6 +686,20 @@ class FicPosApp extends StatefulWidget {
 class _AppState extends State<FicPosApp> {
   bool ready = false;
   bool logged = false;
+  bool _updateChecked = false;
+
+  void _checkUpdateAfterFrame() {
+    if (_updateChecked || ficOfflineMode) return;
+    _updateChecked = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ficCheckAppUpdate(context);
+    });
+  }
+
+  void _onLoggedIn() {
+    setState(() => logged = true);
+    _checkUpdateAfterFrame();
+  }
 
   @override
   void initState() {
@@ -626,7 +729,10 @@ class _AppState extends State<FicPosApp> {
         }
       }
     }
-    if (mounted) setState(() => ready = true);
+    if (mounted) {
+      setState(() => ready = true);
+      if (logged) _checkUpdateAfterFrame();
+    }
   }
 
   @override
@@ -664,7 +770,7 @@ class _AppState extends State<FicPosApp> {
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
             : logged
                 ? HomePage(onLogout: () => setState(() => logged = false))
-                : LoginPage(onLogin: () => setState(() => logged = true)),
+                : LoginPage(onLogin: _onLoggedIn),
       );
 }
 
