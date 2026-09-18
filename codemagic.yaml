@@ -1,14 +1,12 @@
 workflows:
-  fic-pos-ios-ipa-only:
-    name: FIC POS TEST iOS IPA Only
+  fic-pos-ios-preview:
+    name: FIC POS TEST iOS Preview
     instance_type: mac_mini_m2
     max_build_duration: 60
-
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
-
     scripts:
       - name: Flutter packages
         script: |
@@ -19,22 +17,34 @@ workflows:
           chmod +x tool/prepare_ios.sh
           ./tool/prepare_ios.sh
 
-      - name: Install CocoaPods
-        script: |
-          find ios -name "Podfile" -execdir pod install \;
-
       - name: Build iOS without signing
         script: |
           flutter build ios --release --no-codesign
 
-      - name: Package unsigned IPA
+    artifacts:
+      - build/ios/iphoneos/Runner.app/**
+
+  fic-pos-ios-simulator:
+    name: FIC POS TEST iOS Simulator Preview
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Flutter packages
         script: |
-          set -e
-          rm -rf build/ios/ipa
-          mkdir -p build/ios/ipa/Payload
-          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa
-          zip -qry FIC-POS-unsigned.ipa Payload
+          flutter pub get
+
+      - name: Prepare iOS project
+        script: |
+          chmod +x tool/prepare_ios.sh
+          ./tool/prepare_ios.sh
+
+      - name: Build iOS Simulator
+        script: |
+          flutter build ios --simulator
 
     artifacts:
-      - build/ios/ipa/FIC-POS-unsigned.ipa
+      - build/ios/iphonesimulator/Runner.app/**
